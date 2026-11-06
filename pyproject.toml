@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vim-key-trainer"
+version = "0.1.0"
+description = "숫자와 기호부터 시작하는 Vim 키보드 연습기"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = "MIT"
+dependencies = [
+    "PySide6>=6.8,<7.0",
+    "pydantic>=2.7,<3.0",
+    "platformdirs>=4.0,<5.0",
+]
+
+[project.scripts]
+vim-key-trainer = "vim_key_trainer.app:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8,<10",
+    "pytest-qt>=4.4,<5",
+    "ruff>=0.17,<1",
+    "mypy>=1.14,<2",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+vim_key_trainer = ["resources/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+qt_api = "pyside6"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.isort.import-heading]
+standard-library = "Standard library imports"
+third-party = "Third party imports"
+first-party = "Local imports"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src"]
