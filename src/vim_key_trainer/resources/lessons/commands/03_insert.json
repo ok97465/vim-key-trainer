@@ -1,0 +1,243 @@
+{
+  "schema_version": 1,
+  "content_version": 1,
+  "stage": "commands",
+  "id": "commands_insert",
+  "title": "입력·특수 키·되돌리기",
+  "description": "Insert 진입과 실제 Esc·Enter·Backspace·Control+R을 연습합니다.",
+  "difficulty": "beginner",
+  "tags": [
+    "insert",
+    "special_keys",
+    "undo"
+  ],
+  "display_count": 10,
+  "items": [
+    {
+      "id": "insert_before",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "i"
+        },
+        {
+          "kind": "char",
+          "value": "h"
+        },
+        {
+          "kind": "char",
+          "value": "i"
+        },
+        {
+          "kind": "special",
+          "value": "esc"
+        }
+      ],
+      "meaning": "i로 커서 앞에 hi를 입력한 뒤 실제 Esc로 Normal 모드에 돌아옵니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "append_after",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "a"
+        },
+        {
+          "kind": "char",
+          "value": "!"
+        },
+        {
+          "kind": "special",
+          "value": "esc"
+        }
+      ],
+      "meaning": "a로 커서 뒤에 !를 입력한 뒤 Esc로 돌아옵니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "insert_first_nonblank",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "I"
+        },
+        {
+          "kind": "char",
+          "value": "#"
+        },
+        {
+          "kind": "special",
+          "value": "esc"
+        }
+      ],
+      "meaning": "대문자 I로 줄의 첫 공백 아닌 문자 앞에 #을 입력한 뒤 Esc로 돌아옵니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "append_line_end",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "A"
+        },
+        {
+          "kind": "char",
+          "value": ";"
+        },
+        {
+          "kind": "special",
+          "value": "esc"
+        }
+      ],
+      "meaning": "대문자 A로 줄 끝에 ;를 입력한 뒤 Esc로 돌아옵니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "insert_newline",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "i"
+        },
+        {
+          "kind": "char",
+          "value": "a"
+        },
+        {
+          "kind": "special",
+          "value": "enter"
+        },
+        {
+          "kind": "char",
+          "value": "b"
+        },
+        {
+          "kind": "special",
+          "value": "esc"
+        }
+      ],
+      "meaning": "i로 a를 입력하고 실제 Enter로 줄을 나눈 뒤 b를 입력하고 Esc로 돌아옵니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "correct_insert",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "i"
+        },
+        {
+          "kind": "char",
+          "value": "a"
+        },
+        {
+          "kind": "char",
+          "value": "b"
+        },
+        {
+          "kind": "special",
+          "value": "backspace"
+        },
+        {
+          "kind": "char",
+          "value": "c"
+        },
+        {
+          "kind": "special",
+          "value": "esc"
+        }
+      ],
+      "meaning": "i로 입력한 ab에서 실제 Backspace로 b를 지우고 c를 입력한 뒤 Esc로 돌아옵니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "undo",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "u"
+        }
+      ],
+      "meaning": "마지막 변경 하나를 되돌립니다. 실제 Vim에서는 되돌릴 변경 이력이 필요합니다.",
+      "start_mode": "Normal",
+      "follow_up": "완결된 명령입니다. 이 항목 자체는 앞 항목의 편집 이력을 이어받지 않습니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "redo",
+      "tokens": [
+        {
+          "kind": "chord",
+          "value": "ctrl+r"
+        }
+      ],
+      "meaning": "실제 Control+R을 한 번 눌러 되돌렸던 변경 하나를 다시 실행합니다. Normal 모드에서의 의미입니다.",
+      "start_mode": "Normal",
+      "follow_up": "실제 Vim에서는 undo 이력이 필요합니다. macOS에서도 Command+R이 아니라 Control+R입니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "insert_space",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "i"
+        },
+        {
+          "kind": "char",
+          "value": "a"
+        },
+        {
+          "kind": "char",
+          "value": " "
+        },
+        {
+          "kind": "char",
+          "value": "b"
+        },
+        {
+          "kind": "special",
+          "value": "esc"
+        }
+      ],
+      "meaning": "공백을 포함한 a b를 커서 앞에 입력한 뒤 Esc로 돌아옵니다. 표시된 <Space>는 실제 공백 한 키입니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "insert_literal_angle",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "i"
+        },
+        {
+          "kind": "char",
+          "value": "<"
+        },
+        {
+          "kind": "special",
+          "value": "esc"
+        }
+      ],
+      "meaning": "실제 문자 <를 입력한 뒤 Esc로 돌아옵니다. < 문자와 <Esc> 키 표기를 구별하세요.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    }
+  ]
+}

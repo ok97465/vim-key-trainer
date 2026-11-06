@@ -7,9 +7,11 @@ import pytest
 # Local imports
 from vim_key_trainer.domain.exercises import (
     EXERCISES,
+    QUOTES,
     Exercise,
     PracticeSpec,
     generate_target,
+    get_exercise,
 )
 from vim_key_trainer.domain.game_rules import typing_stars
 from vim_key_trainer.domain.keys import KeyToken
@@ -53,6 +55,72 @@ def test_seed_and_retry_reproduce_problem_but_get_new_attempt_ids() -> None:
     assert retry.target == first.target == generate_target(spec)
     assert retry.attempt_id != first.attempt_id
     assert generate_target(PracticeSpec(seed=16)) != first.target
+
+
+@pytest.mark.parametrize(
+    ("exercise_id", "expected"),
+    [
+        ("numbers", "15386280801970609773"),
+        ("shift_symbols", "!%#*^@*)*)!(&)^)(&&#"),
+        ("symbols", '_|[,:~+,?.?-<"/:?>"\''),
+        ("mixed", "3(0|+7|/:/2'}<+?.}]@"),
+    ],
+)
+def test_original_random_lessons_preserve_their_seeded_targets(
+    exercise_id: str, expected: str
+) -> None:
+    assert (
+        generate_target(
+            PracticeSpec(exercise_id=exercise_id, seed=43, target_length=20)
+        )
+        == expected
+    )
+
+
+@pytest.mark.parametrize("exercise_id", ["bracket_pairs", "quotes"])
+@pytest.mark.parametrize("length", [1, 2, 3, 21, 10_000])
+def test_focused_lessons_keep_exact_length_alphabet_and_reproducibility(
+    exercise_id: str, length: int
+) -> None:
+    spec = PracticeSpec(exercise_id=exercise_id, target_length=length, seed=71)
+    target = generate_target(spec)
+    assert len(target) == length
+    assert set(target) <= set(get_exercise(exercise_id).characters)
+    assert not any(character.isspace() for character in target)
+    assert generate_target(spec) == target
+    if length >= 21:
+        assert (
+            generate_target(
+                PracticeSpec(exercise_id=exercise_id, target_length=length, seed=72)
+            )
+            != target
+        )
+
+
+@pytest.mark.parametrize("length", [1, 2, 3, 20, 21, 10_000])
+def test_bracket_lesson_never_truncates_a_pair(length: int) -> None:
+    target = generate_target(
+        PracticeSpec(exercise_id="bracket_pairs", target_length=length, seed=43)
+    )
+    closing = {"(": ")", "[": "]", "{": "}", "<": ">"}
+    stack: list[str] = []
+    maximum_depth = 0
+    for character in target:
+        if character in closing:
+            stack.append(closing[character])
+            maximum_depth = max(maximum_depth, len(stack))
+        elif not character.isdigit():
+            assert stack and stack.pop() == character
+    assert not stack
+    assert sum(character.isdigit() for character in target) == length % 2
+    assert maximum_depth <= 3
+    if length >= 21:
+        assert maximum_depth >= 2
+
+
+def test_quote_lesson_focuses_on_each_quote_and_escape_symbol() -> None:
+    target = generate_target(PracticeSpec(exercise_id="quotes", seed=43))
+    assert set(target) == set(QUOTES)
 
 
 @pytest.mark.parametrize(

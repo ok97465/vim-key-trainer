@@ -1,0 +1,194 @@
+{
+  "schema_version": 1,
+  "content_version": 1,
+  "stage": "commands",
+  "id": "commands_context",
+  "title": "명령 조각과 문맥",
+  "description": "추가 입력·편집 이력이 필요한 명령을 독립된 항목으로 익힙니다.",
+  "difficulty": "intermediate",
+  "tags": [
+    "context",
+    "text_object",
+    "register",
+    "macro"
+  ],
+  "display_count": 8,
+  "items": [
+    {
+      "id": "change_inner_word_eight",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "8"
+        },
+        {
+          "kind": "char",
+          "value": "c"
+        },
+        {
+          "kind": "char",
+          "value": "i"
+        },
+        {
+          "kind": "char",
+          "value": "w"
+        }
+      ],
+      "meaning": "count 8을 적용한 iw 범위를 c로 바꾸고 Insert 모드로 진입합니다. iw는 단어 사이 공백도 세므로 영단어 8개 교체와 같지 않습니다.",
+      "start_mode": "Normal",
+      "follow_up": "명령 조각입니다. 실제 Vim에서는 바꿀 문자를 입력하고 Esc로 Insert 모드를 끝내야 합니다. 이 항목은 8ciw까지만 입력합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "goto_line_twenty_two",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "2"
+        },
+        {
+          "kind": "char",
+          "value": "2"
+        },
+        {
+          "kind": "char",
+          "value": "g"
+        },
+        {
+          "kind": "char",
+          "value": "g"
+        }
+      ],
+      "meaning": "문서의 22번째 줄로 이동합니다. 숫자 22는 반복 횟수가 아니라 gg의 목표 줄 번호입니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "record_macro_a",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "q"
+        },
+        {
+          "kind": "char",
+          "value": "a"
+        }
+      ],
+      "meaning": "레지스터 a에 매크로 기록을 시작합니다. 실제 Vim에서 기록 중이 아닌 Normal 모드를 전제로 합니다.",
+      "start_mode": "Normal",
+      "follow_up": "기록 시작 조각입니다. 이후 동작을 기록하고 q로 종료해야 합니다. 이 게임은 매크로를 기록하지 않으며 qa만 입력합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "clipboard_yank",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "\""
+        },
+        {
+          "kind": "char",
+          "value": "+"
+        },
+        {
+          "kind": "char",
+          "value": "y"
+        }
+      ],
+      "meaning": "클립보드 관련 + 레지스터를 지정하고 yank 연산을 시작합니다. 선택 영역이 없는 Normal 모드를 전제로 합니다.",
+      "start_mode": "Normal",
+      "follow_up": "미완성 연산자입니다. 실제 Vim에서는 motion·text object 또는 y가 더 필요하며 클립보드 지원도 필요합니다. 여기서는 OS 클립보드에 접근하지 않고 \"+y만 입력합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "change_inner_word",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "c"
+        },
+        {
+          "kind": "char",
+          "value": "i"
+        },
+        {
+          "kind": "char",
+          "value": "w"
+        }
+      ],
+      "meaning": "현재 inner word 범위를 바꾸고 Insert 모드로 진입합니다.",
+      "start_mode": "Normal",
+      "follow_up": "실제 Vim에서는 대체할 문자 입력과 Esc 복귀가 더 필요합니다. 이 항목은 ciw까지만 입력합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "yank_line",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "y"
+        },
+        {
+          "kind": "char",
+          "value": "y"
+        }
+      ],
+      "meaning": "현재 줄을 레지스터에 복사합니다. 문서는 바뀌지 않으며 나중에 p 등으로 붙일 수 있습니다.",
+      "start_mode": "Normal",
+      "follow_up": "완결된 명령입니다. 이 게임에서는 실제 복사나 레지스터 저장을 실행하지 않습니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "undo_then_redo",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "u"
+        },
+        {
+          "kind": "chord",
+          "value": "ctrl+r"
+        }
+      ],
+      "meaning": "u로 변경 하나를 되돌리고 실제 Control+R로 다시 실행하는 한 항목입니다.",
+      "start_mode": "Normal",
+      "follow_up": "실제 Vim에서는 되돌릴 변경 이력이 필요합니다. 앞 항목의 편집 상태나 레지스터를 이어받지 않습니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "change_and_finish",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "c"
+        },
+        {
+          "kind": "char",
+          "value": "i"
+        },
+        {
+          "kind": "char",
+          "value": "w"
+        },
+        {
+          "kind": "char",
+          "value": "o"
+        },
+        {
+          "kind": "char",
+          "value": "k"
+        },
+        {
+          "kind": "special",
+          "value": "esc"
+        }
+      ],
+      "meaning": "ciw로 현재 단어를 바꾸고 ok를 입력한 뒤 실제 Esc로 Normal 모드에 돌아옵니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 시퀀스는 Insert 종료까지 포함합니다. 이 게임에서는 토큰 타이핑만 채점하고 편집 결과를 실행하지 않습니다.",
+      "execution_support": "typing_only"
+    }
+  ]
+}

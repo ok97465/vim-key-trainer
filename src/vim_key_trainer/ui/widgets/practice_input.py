@@ -23,7 +23,7 @@ from vim_key_trainer.ui.qt_input import normalize_key_event
 class PracticeInput(QWidget):
     key_received = Signal(object)
     key_released = Signal()
-    focus_lost = Signal()
+    focus_lost = Signal(object)
     composition_blocked = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -75,7 +75,7 @@ class PracticeInput(QWidget):
 
     def focusOutEvent(self, event: QFocusEvent) -> None:
         super().focusOutEvent(event)
-        self.focus_lost.emit()
+        self.focus_lost.emit(event.reason())
         self.update()
 
     def focusInEvent(self, event: QFocusEvent) -> None:

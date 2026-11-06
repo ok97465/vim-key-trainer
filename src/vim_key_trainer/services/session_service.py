@@ -144,7 +144,7 @@ class PracticeSession:
                 correct=self.position,
                 incorrect=self.incorrect,
             ),
-            errors=MappingProxyType(dict(self.errors)),
+            errors=MappingProxyType(self.errors),
             keypad_errors=self.keypad_errors,
             pause_count=self.pause_count,
             reaction_times=tuple(self._reaction_times),

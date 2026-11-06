@@ -55,7 +55,7 @@ def begin(
 def test_menu_opens_ready_practice_without_starting_clock(
     window: MainWindow, qtbot: QtBot
 ) -> None:
-    assert window.stack.currentWidget() is window.home_page
+    assert window.stack.currentWidget() is window.numbers_page
     window.prepare_practice("numbers")
     assert window.session is not None
     assert window.stack.currentWidget() is window.practice_page
@@ -74,7 +74,7 @@ def test_menu_opens_ready_practice_without_starting_clock(
 
 
 @pytest.mark.parametrize("exercise_id", [exercise.id for exercise in EXERCISES])
-def test_all_four_lessons_complete_through_real_key_events(
+def test_all_numeric_lessons_complete_through_real_key_events(
     window: MainWindow, qtbot: QtBot, exercise_id: str
 ) -> None:
     session = begin(window, qtbot, exercise_id=exercise_id, length=20)
@@ -119,10 +119,12 @@ def test_twenty_character_boundary_has_no_lost_or_duplicated_input(
     assert session.position == 100
     assert session.max_combo == 100
     assert window.repository.completed_count == 1
-    # A late input cannot create another attempt or save the result twice.
+    # A late input cannot resave the attempt or overwrite its record notification.
+    note = window.result_note.text()
     qtbot.keyClicks(window.practice_input, "1")
     assert window.repository.completed_count == 1
     assert len(window.repository.results) == 1
+    assert window.result_note.text() == note
 
 
 def test_paste_repeat_and_ime_do_not_advance_or_count(
@@ -186,7 +188,7 @@ def test_focus_loss_pauses_and_focus_return_does_not_resume(
 ) -> None:
     session = begin(window, qtbot)
     qtbot.keyClicks(window.practice_input, session.target[0])
-    window.home_button.setFocus()
+    window.numbers_button.setFocus()
     qtbot.waitUntil(lambda: session.state == SessionState.PAUSED)
     window.practice_input.setFocus()
     qtbot.keyClicks(window.practice_input, session.target[1])
@@ -196,6 +198,20 @@ def test_focus_loss_pauses_and_focus_return_does_not_resume(
     qtbot.mouseClick(window.pause_button, Qt.MouseButton.LeftButton)
     qtbot.keyClicks(window.practice_input, session.target[1])
     assert session.position == 2
+
+
+def test_focus_on_pause_button_requires_explicit_resume(
+    window: MainWindow, qtbot: QtBot
+) -> None:
+    session = begin(window, qtbot)
+    qtbot.keyClicks(window.practice_input, session.target[0])
+    window.pause_button.setFocus(Qt.FocusReason.OtherFocusReason)
+    qtbot.waitUntil(lambda: session.state == SessionState.PAUSED)
+    assert not window.timer.isActive()
+    assert session.pause_count == 1
+    qtbot.mouseClick(window.pause_button, Qt.MouseButton.LeftButton)
+    assert session.state == SessionState.RUNNING
+    qtbot.waitUntil(window.practice_input.hasFocus)
 
 
 def test_retry_keeps_target_and_seed_but_uses_new_attempt(
@@ -216,14 +232,20 @@ def test_new_problem_changes_seed_and_target_and_preserves_settings(
     window: MainWindow, qtbot: QtBot
 ) -> None:
     previous = begin(window, qtbot)
-    window.new_problem()
+    qtbot.keyClicks(window.practice_input, previous.target[0])
+    qtbot.mouseClick(window.new_problem_button, Qt.MouseButton.LeftButton)
     assert window.session is not None
     assert previous.state == SessionState.ABORTED
+    assert previous.result is not None and previous.result.stars == 0
     assert window.session.spec.seed != previous.spec.seed
+    assert window.session.spec.exercise_id == previous.spec.exercise_id
     assert window.session.target != previous.target
     assert window.session.spec.display_width == previous.spec.display_width
     assert window.session.spec.target_length == previous.spec.target_length
     assert window.session.state == SessionState.READY
+    assert window.session.elapsed_seconds == 0
+    assert window.repository.completed_count == 0
+    assert window.start_button.hasFocus()
 
 
 def test_restart_and_menu_abort_without_awarding_stars(
@@ -241,7 +263,7 @@ def test_restart_and_menu_abort_without_awarding_stars(
     assert window.session.position == 0
     window.show_home()
     assert window.session.state == SessionState.ABORTED
-    assert window.stack.currentWidget() is window.home_page
+    assert window.stack.currentWidget() is window.numbers_page
     assert window.repository.completed_count == 0
     assert window.repository.best_stars("numbers") == 0
 
@@ -267,7 +289,7 @@ def test_menu_click_uses_settings_and_result_retry_preserves_problem(
     window.length_combo.setCurrentIndex(0)  # 20자
     window.width_combo.setCurrentIndex(2)  # 40자 표시
     window.show_home()
-    lesson = window.home_page.findChild(QPushButton, "lesson_numbers")
+    lesson = window.numbers_page.findChild(QPushButton, "lesson_numbers")
     assert lesson is not None
     qtbot.mouseClick(lesson, Qt.MouseButton.LeftButton)
     assert window.session is not None

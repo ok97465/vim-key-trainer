@@ -7,6 +7,7 @@ from secrets import randbelow
 from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication,
+    QButtonGroup,
     QComboBox,
     QFrame,
     QGridLayout,
@@ -14,8 +15,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QProgressBar,
-    QPushButton,
-    QScrollArea,
     QSpinBox,
     QStackedWidget,
     QVBoxLayout,
@@ -23,29 +22,21 @@ from PySide6.QtWidgets import (
 )
 
 # Local imports
+from vim_key_trainer.domain.command_generator import (
+    get_command_profile,
+    list_command_profiles,
+)
+from vim_key_trainer.domain.commands import CommandSpec
 from vim_key_trainer.domain.exercises import EXERCISES, PracticeSpec
 from vim_key_trainer.domain.sessions import InputResult, SessionResult, SessionState
 from vim_key_trainer.services.result_repository import MemoryResultRepository
 from vim_key_trainer.services.session_service import PracticeSession
+from vim_key_trainer.ui.command_practice import CommandPracticePage
+from vim_key_trainer.ui.components import button, label, scroll_page
 from vim_key_trainer.ui.qt_input import NormalizedKey
 from vim_key_trainer.ui.widgets.practice_input import PracticeInput
 
-
-def label(text: str, role: str = "", *, wrap: bool = False) -> QLabel:
-    widget = QLabel(text)
-    widget.setTextFormat(Qt.TextFormat.PlainText)
-    widget.setObjectName(role)
-    widget.setWordWrap(wrap)
-    return widget
-
-
-def button(text: str, name: str = "", *, primary: bool = False) -> QPushButton:
-    widget = QPushButton(text)
-    widget.setObjectName("primary" if primary else name)
-    if name:
-        widget.setAccessibleName(name)
-    widget.setAutoDefault(False)
-    return widget
+_SHIFT_KEYS = dict(zip('!@#$%^&*()_+{}|:"<>?~', "1234567890-=[]\\;',./`", strict=True))
 
 
 def card() -> tuple[QFrame, QVBoxLayout]:
@@ -75,6 +66,8 @@ class MainWindow(QMainWindow):
         self._result_metrics: dict[str, QLabel] = {}
         self._metric_labels: dict[str, QLabel] = {}
         self._lesson_stars: dict[str, QLabel] = {}
+        self._command_lesson_stars: dict[tuple[str, int], QLabel] = {}
+        self._category = "numbers"
 
         root = QWidget()
         self.setCentralWidget(root)
@@ -85,14 +78,21 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.stack.setObjectName("pages")
         shell.addWidget(self.stack, 1)
-        self.home_page = self._make_home()
+        self.numbers_page = self._make_numbers_menu()
+        self.commands_menu_page = self._make_commands_menu()
+        self.editing_page = self._make_editing_menu()
         self.practice_page = self._make_practice()
+        self.command_page = CommandPracticePage(self.repository)
+        self.command_page.leave_requested.connect(self.show_commands_menu)
         self.result_page = self._make_result()
         self.diagnostic_page = self._make_diagnostics()
         self.settings_page = self._make_settings()
         for page in (
-            self.home_page,
+            self.numbers_page,
+            self.commands_menu_page,
+            self.editing_page,
             self.practice_page,
+            self.command_page,
             self.result_page,
             self.diagnostic_page,
             self.settings_page,
@@ -101,7 +101,8 @@ class MainWindow(QMainWindow):
         self.timer = QTimer(self)
         self.timer.setInterval(100)
         self.timer.timeout.connect(self._refresh_metrics)
-        self.stack.setCurrentWidget(self.home_page)
+        self.stack.setCurrentWidget(self.numbers_page)
+        self.numbers_button.setChecked(True)
 
     def _make_sidebar(self) -> QFrame:
         sidebar = QFrame()
@@ -113,15 +114,28 @@ class MainWindow(QMainWindow):
         layout.addWidget(label("vim_", "brand"))
         layout.addWidget(label("KEY TRAINER", "muted"))
         layout.addSpacing(30)
-        self.home_button = button("⌂   연습 메뉴", "nav")
-        self.home_button.clicked.connect(self.show_home)
-        layout.addWidget(self.home_button)
-        diagnostic_button = button("⌨   키 입력 진단", "nav")
-        diagnostic_button.clicked.connect(self.show_diagnostics)
-        layout.addWidget(diagnostic_button)
-        settings_button = button("⚙   연습 설정", "nav")
-        settings_button.clicked.connect(self.show_settings)
-        layout.addWidget(settings_button)
+        self.numbers_button = button("숫자·기호 연습", "nav")
+        self.numbers_button.setAccessibleName("navNumbers")
+        self.commands_button = button("Vim 명령 연습", "nav")
+        self.commands_button.setAccessibleName("navCommands")
+        self.editing_button = button("문서 수정 연습", "nav")
+        self.editing_button.setAccessibleName("navEditing")
+        self.diagnostic_button = button("⌨   키 입력 진단", "nav")
+        self.diagnostic_button.setAccessibleName("navDiagnostics")
+        self.settings_button = button("⚙   연습 설정", "nav")
+        self.settings_button.setAccessibleName("navSettings")
+        self.nav_group = QButtonGroup(self)
+        for item, handler in (
+            (self.numbers_button, self.show_numbers),
+            (self.commands_button, self.show_commands_menu),
+            (self.editing_button, self.show_editing),
+            (self.diagnostic_button, self.show_diagnostics),
+            (self.settings_button, self.show_settings),
+        ):
+            item.setCheckable(True)
+            self.nav_group.addButton(item)
+            item.clicked.connect(handler)
+            layout.addWidget(item)
         layout.addStretch()
         layout.addWidget(label("작은 연습, 익숙한 움직임", "muted", wrap=True))
         layout.addWidget(label("LOCAL · OFFLINE\nv0.1  /  기본 연습", "muted"))
@@ -130,44 +144,20 @@ class MainWindow(QMainWindow):
     def _page(
         self, eyebrow: str, title: str, description: str
     ) -> tuple[QWidget, QVBoxLayout]:
-        page = QWidget()
-        outer = QVBoxLayout(page)
-        outer.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        outer.addWidget(scroll)
-        content = QWidget()
-        layout = QVBoxLayout(content)
-        layout.setContentsMargins(32, 28, 32, 26)
-        layout.setSpacing(16)
+        page, layout = scroll_page(margins=(32, 28, 32, 26), spacing=16)
         layout.addWidget(label(eyebrow, "eyebrow"))
         layout.addWidget(label(title, "title"))
         layout.addWidget(label(description, "muted", wrap=True))
-        scroll.setWidget(content)
         return page, layout
 
-    def _make_home(self) -> QWidget:
+    def _make_numbers_menu(self) -> QWidget:
         page, layout = self._page(
-            "YOUR DAILY PRACTICE",
-            "Vim, 손끝부터 익혀 보세요.",
-            "숫자와 기호부터 차근차근. 속도보다 정확하게, 짧게 반복하세요.",
+            "01 / NUMBERS & SYMBOLS",
+            "숫자·기호 연습",
+            "키 위치부터 반복·연속 패턴까지. 익히고 싶은 유형을 골라 연습하세요.",
         )
-        stages = QHBoxLayout()
-        for number, title, detail in (
-            ("01 · 지금 시작", "숫자·기호", "키 위치와 연속 입력 익히기"),
-            ("02 · 준비 중", "Vim 명령", "명령을 입력하며 의미 익히기"),
-            ("03 · 준비 중", "문서 수정", "목표 문서로 바꾸며 응용하기"),
-        ):
-            frame, box = card()
-            box.addWidget(
-                label(number, "eyebrow" if number.startswith("01") else "muted")
-            )
-            box.addWidget(label(title, "sectionTitle"))
-            box.addWidget(label(detail, "muted", wrap=True))
-            stages.addWidget(frame)
-        layout.addLayout(stages)
         header = QHBoxLayout()
-        header.addWidget(label("오늘의 기본 연습", "sectionTitle"))
+        header.addWidget(label(f"{len(EXERCISES)}가지 연습", "sectionTitle"))
         header.addStretch()
         self.home_summary = label("이번 실행에서 완료 0회", "muted")
         header.addWidget(self.home_summary)
@@ -175,9 +165,10 @@ class MainWindow(QMainWindow):
 
         grid = QGridLayout()
         grid.setSpacing(12)
-        examples = ("1234567890", "!@#$%^&*()", "[]{} <> / ? : ;", "3$7[2!9]0%")
         for index, exercise in enumerate(EXERCISES):
             frame, box = card()
+            box.setContentsMargins(18, 14, 18, 14)
+            box.setSpacing(6)
             top = QHBoxLayout()
             top.addWidget(label(exercise.title, "sectionTitle"))
             top.addStretch()
@@ -185,7 +176,7 @@ class MainWindow(QMainWindow):
             self._lesson_stars[exercise.id] = stars
             top.addWidget(stars)
             box.addLayout(top)
-            box.addWidget(label(examples[index], "brand"))
+            box.addWidget(label(exercise.example, "brand"))
             box.addWidget(label(exercise.description, "muted", wrap=True))
             start = button("연습 준비  →", f"lesson_{exercise.id}")
             start.clicked.connect(
@@ -196,11 +187,98 @@ class MainWindow(QMainWindow):
         layout.addLayout(grid)
         layout.addWidget(
             label(
-                "계정 없이 로컬에서 연습합니다. 현재 기록은 앱을 닫을 때 초기화됩니다.",
+                "예시의 구분 공백은 입력하지 않습니다. "
+                "현재 기록은 앱을 닫을 때 초기화됩니다.",
                 "muted",
                 wrap=True,
             )
         )
+        layout.addStretch()
+        return page
+
+    def _make_commands_menu(self) -> QWidget:
+        page, layout = self._page(
+            "02 / VIM COMMANDS",
+            "Vim 명령 연습",
+            "문법에 맞는 새 조합을 계속 생성합니다. "
+            "원하는 명령 계열에 집중하거나 전체를 섞어 연습하세요.",
+        )
+        header = QHBoxLayout()
+        header.addWidget(
+            label(f"{len(list_command_profiles())}가지 연습", "sectionTitle")
+        )
+        header.addStretch()
+        self.commands_summary = label("이번 실행에서 완료 0회", "muted")
+        header.addWidget(self.commands_summary)
+        layout.addLayout(header)
+        commands = QGridLayout()
+        commands.setSpacing(12)
+        for index, lesson in enumerate(list_command_profiles()):
+            frame, box = card()
+            box.setContentsMargins(18, 14, 18, 14)
+            box.setSpacing(6)
+            top = QHBoxLayout()
+            top.addWidget(label(lesson.title, "sectionTitle"))
+            top.addStretch()
+            stars = label("☆☆☆", "eyebrow")
+            self._command_lesson_stars[(lesson.id, lesson.content_version)] = stars
+            top.addWidget(stars)
+            box.addLayout(top)
+            box.addWidget(label(lesson.example, "eyebrow", wrap=True))
+            box.addWidget(label(lesson.description, "muted", wrap=True))
+            box.addWidget(
+                label(
+                    f"{lesson.display_count}개씩 자동 생성 · 마칠 때까지 계속", "muted"
+                )
+            )
+            start = button("명령 연습 준비  →", f"lesson_{lesson.id}")
+            start.clicked.connect(
+                lambda checked=False, key=lesson.id: self.prepare_commands(key)
+            )
+            box.addWidget(start)
+            commands.addWidget(frame, index // 2, index % 2)
+        layout.addLayout(commands)
+        layout.addWidget(
+            label(
+                "명령 오른쪽의 짧은 뜻을 보며 입력하세요. "
+                "연습 마치기까지 10개씩 자동 공급합니다.",
+                "muted",
+                wrap=True,
+            )
+        )
+        layout.addStretch()
+        return page
+
+    def _make_editing_menu(self) -> QWidget:
+        page, layout = self._page(
+            "03 / DOCUMENT EDITING",
+            "문서 수정 연습",
+            "현재 문서를 목표 문서와 같게 바꾸며 Vim 명령을 응용하는 연습입니다.",
+        )
+        layout.addWidget(label("아직 준비 중인 연습입니다.", "eyebrow"))
+        modes = QHBoxLayout()
+        for title, description in (
+            ("가이드 풀이", "단계별 안내를 따라 문서를 바꾸고 명령의 쓰임을 익힙니다."),
+            ("자유 풀이", "스스로 풀이를 찾아 입력 횟수와 수정 시간을 비교합니다."),
+        ):
+            frame, box = card()
+            box.addWidget(label(title, "sectionTitle"))
+            box.addWidget(label(description, "muted", wrap=True))
+            modes.addWidget(frame)
+        layout.addLayout(modes)
+        layout.addWidget(
+            label("먼저 숫자·기호와 Vim 명령을 연습할 수 있습니다.", "muted", wrap=True)
+        )
+        actions = QHBoxLayout()
+        numbers = button("숫자·기호 연습으로", "editingToNumbers")
+        numbers.clicked.connect(self.show_numbers)
+        actions.addWidget(numbers)
+        commands = button("Vim 명령 연습으로", "editingToCommands", primary=True)
+        commands.clicked.connect(self.show_commands_menu)
+        actions.addWidget(commands)
+        actions.addStretch()
+        layout.addLayout(actions)
+        layout.addStretch()
         return page
 
     def _make_practice(self) -> QWidget:
@@ -249,6 +327,25 @@ class MainWindow(QMainWindow):
         self.feedback.setMinimumHeight(26)
         layout.addWidget(self.feedback)
 
+        actions = QHBoxLayout()
+        self.start_button = button("연습 시작", "startPractice", primary=True)
+        self.start_button.clicked.connect(self.start_practice)
+        actions.addWidget(self.start_button)
+        self.pause_button = button("일시정지", "pausePractice")
+        self.pause_button.clicked.connect(self.toggle_pause)
+        actions.addWidget(self.pause_button)
+        self.restart_button = button("같은 문제 다시", "restartPractice")
+        self.restart_button.clicked.connect(self.retry)
+        actions.addWidget(self.restart_button)
+        self.new_problem_button = button("다른 문제", "newPracticeProblem")
+        self.new_problem_button.clicked.connect(self.new_problem)
+        actions.addWidget(self.new_problem_button)
+        actions.addStretch()
+        leave = button("숫자·기호 선택", "leavePractice")
+        leave.clicked.connect(self.show_numbers)
+        actions.addWidget(leave)
+        layout.addLayout(actions)
+
         keyboard, key_box = card()
         key_box.setContentsMargins(16, 12, 16, 12)
         key_box.addWidget(
@@ -268,22 +365,6 @@ class MainWindow(QMainWindow):
                 keys.addWidget(key_label)
             key_box.addLayout(keys)
         layout.addWidget(keyboard)
-        actions = QHBoxLayout()
-        self.start_button = button("연습 시작", "startPractice", primary=True)
-        self.start_button.clicked.connect(self.start_practice)
-        actions.addWidget(self.start_button)
-        self.pause_button = button("일시정지", "pausePractice")
-        self.pause_button.clicked.connect(self.toggle_pause)
-        actions.addWidget(self.pause_button)
-        self.restart_button = button("같은 문제 다시", "restartPractice")
-        self.restart_button.clicked.connect(self.retry)
-        actions.addWidget(self.restart_button)
-        actions.addStretch()
-        leave = button("메뉴로", "leavePractice")
-        leave.clicked.connect(self.show_home)
-        actions.addWidget(leave)
-        # 작은 창에서도 일시정지·나가기 버튼을 입력 영역 바로 아래에 둔다.
-        layout.insertLayout(layout.indexOf(keyboard), actions)
         layout.addWidget(
             label(
                 "오타는 그 자리에서 다시 입력 · Backspace 무시 · "
@@ -343,8 +424,8 @@ class MainWindow(QMainWindow):
         fresh = button("새 문제", "newProblem")
         fresh.clicked.connect(self.new_problem)
         actions.addWidget(fresh)
-        home = button("연습 메뉴", "resultHome")
-        home.clicked.connect(self.show_home)
+        home = button("숫자·기호 선택", "resultHome")
+        home.clicked.connect(self.show_numbers)
         actions.addWidget(home)
         layout.addLayout(actions)
         layout.addWidget(
@@ -400,7 +481,7 @@ class MainWindow(QMainWindow):
             "다음 연습부터 적용합니다. 현재 설정은 앱을 닫을 때 초기화됩니다.",
         )
         frame, box = card()
-        box.addWidget(label("총 목표 길이", "sectionTitle"))
+        box.addWidget(label("숫자·기호의 총 목표 길이", "sectionTitle"))
         self.length_combo = QComboBox()
         self.length_combo.setObjectName("targetLength")
         self.length_combo.setAccessibleName("총 목표 길이")
@@ -408,7 +489,7 @@ class MainWindow(QMainWindow):
             self.length_combo.addItem(f"{length}자", length)
         self.length_combo.setCurrentIndex(2)
         box.addWidget(self.length_combo)
-        box.addWidget(label("한 번에 표시할 문자 수", "sectionTitle"))
+        box.addWidget(label("숫자·기호의 표시 문자 수", "sectionTitle"))
         self.width_combo = QComboBox()
         self.width_combo.setObjectName("displayWidth")
         self.width_combo.setAccessibleName("표시 문자 수")
@@ -426,6 +507,13 @@ class MainWindow(QMainWindow):
         box.addWidget(
             label(
                 "좁은 창에서는 여러 문자가 함께 보이도록 크기를 자동 조절합니다.",
+                "muted",
+                wrap=True,
+            )
+        )
+        box.addWidget(
+            label(
+                "Vim 명령은 10개씩 새 조합을 생성하며 연습 마치기까지 계속됩니다.",
                 "muted",
                 wrap=True,
             )
@@ -449,31 +537,72 @@ class MainWindow(QMainWindow):
         try:
             if self.session is not None:
                 self.session.abort()
+            self.command_page.abort()
             self.timer.stop()
             self.stack.setCurrentWidget(page)
         finally:
             self._switching = False
 
     def show_home(self) -> None:
-        self._navigate(self.home_page)
-        self.home_summary.setText(
-            f"이번 실행에서 완료 {self.repository.completed_count}회"
+        if self._category == "commands":
+            self.show_commands_menu()
+        elif self._category == "editing":
+            self.show_editing()
+        else:
+            self.show_numbers()
+
+    def _refresh_catalogs(self) -> None:
+        number_count = sum(
+            isinstance(result, SessionResult) and result.state == SessionState.COMPLETED
+            for result in self.repository.results
         )
+        command_count = self.repository.completed_count - number_count
+        self.home_summary.setText(f"이번 실행에서 완료 {number_count}회")
+        self.commands_summary.setText(f"이번 실행에서 완료 {command_count}회")
         for exercise_id, widget in self._lesson_stars.items():
             stars = self.repository.best_stars(exercise_id)
             widget.setText("★" * stars + "☆" * (3 - stars))
+        for (lesson_id, version), widget in self._command_lesson_stars.items():
+            stars = self.repository.best_command_stars(lesson_id, version)
+            widget.setText("★" * stars + "☆" * (3 - stars))
+
+    def show_numbers(self) -> None:
+        self._category = "numbers"
+        self._navigate(self.numbers_page)
+        self.numbers_button.setChecked(True)
+        self.numbers_button.setFocus(Qt.FocusReason.OtherFocusReason)
+        self._refresh_catalogs()
+
+    def show_commands_menu(self) -> None:
+        self._category = "commands"
+        self._navigate(self.commands_menu_page)
+        self.commands_button.setChecked(True)
+        self.commands_button.setFocus(Qt.FocusReason.OtherFocusReason)
+        self._refresh_catalogs()
+
+    def show_editing(self) -> None:
+        self._category = "editing"
+        self._navigate(self.editing_page)
+        self.editing_button.setChecked(True)
+        self.editing_button.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def show_diagnostics(self) -> None:
         self._navigate(self.diagnostic_page)
+        self.diagnostic_button.setChecked(True)
         self.diagnostic_input.setFocus()
 
     def show_settings(self) -> None:
         self._navigate(self.settings_page)
+        self.settings_button.setChecked(True)
 
     def prepare_practice(
         self, exercise_id: str, spec: PracticeSpec | None = None
     ) -> None:
+        self._category = "numbers"
         self._navigate(self.practice_page)
+        self.numbers_button.setChecked(True)
+        # 이전 입력 영역의 포커스를 정리한 뒤 새 시도를 만든다.
+        self.practice_input.setEnabled(False)
         if spec is None:
             spec = PracticeSpec(
                 exercise_id=exercise_id,
@@ -489,7 +618,6 @@ class MainWindow(QMainWindow):
         )
         self.practice_input.font_size = self.font_spin.value()
         self.practice_input.paused = False
-        self.practice_input.setEnabled(False)
         self.start_button.show()
         self.pause_button.setEnabled(False)
         self.pause_button.setText("일시정지")
@@ -501,8 +629,15 @@ class MainWindow(QMainWindow):
         self._update_target()
         self.start_button.setFocus()
 
+    def prepare_commands(self, lesson_id: str, spec: CommandSpec | None = None) -> None:
+        lesson = get_command_profile(lesson_id)
+        self._category = "commands"
+        self._navigate(self.command_page)
+        self.commands_button.setChecked(True)
+        self.command_page.prepare(lesson, spec, font_size=self.font_spin.value())
+
     def start_practice(self) -> None:
-        if self.session is None:
+        if self.session is None or self.session.state != SessionState.READY:
             return
         self.start_button.hide()
         self.practice_input.setEnabled(True)
@@ -514,7 +649,11 @@ class MainWindow(QMainWindow):
         self.timer.start()
 
     def _receive_key(self, normalized: NormalizedKey) -> None:
-        if self.session is None or self.session.state == SessionState.PAUSED:
+        if (
+            self.session is None
+            or not self.practice_input.isEnabled()
+            or self.session.state not in {SessionState.READY, SessionState.RUNNING}
+        ):
             return
         expected = self.session.target[
             self.session.position : self.session.position + 1
@@ -574,23 +713,25 @@ class MainWindow(QMainWindow):
             session.target, session.position, session.spec.display_width
         )
         expected = session.target[session.position : session.position + 1]
-        shift_map = dict(
-            zip('!@#$%^&*()_+{}|:"<>?~', "1234567890-=[]\\;',./`", strict=True)
-        )
-        physical = shift_map.get(expected, expected)
-        actual_key = shift_map.get(actual, actual)
+        physical = _SHIFT_KEYS.get(expected, expected)
+        actual_key = _SHIFT_KEYS.get(actual, actual)
         for key, widget in self._keyboard_labels.items():
-            target = key == physical or (key == "Shift" and expected in shift_map)
+            target = key == physical or (key == "Shift" and expected in _SHIFT_KEYS)
             border = "#f1c27e" if key == actual_key else "#405168"
-            widget.setStyleSheet(
+            style = (
                 f"background: {'#c3ef85' if target else '#243041'}; "
                 f"color: {'#17220e' if target else '#bdc8d6'}; "
                 f"border: 2px solid {border}; border-radius: 5px;"
             )
+            if widget.styleSheet() != style:
+                widget.setStyleSheet(style)
 
-    def _focus_lost(self) -> None:
-        # 일시정지 버튼 클릭은 클릭 핸들러가 직접 처리한다.
-        if QApplication.focusWidget() is self.pause_button:
+    def _focus_lost(self, reason: Qt.FocusReason) -> None:
+        # 마우스 클릭은 버튼 핸들러가 처리하고, 다른 포커스 이동은 일시정지한다.
+        if (
+            reason == Qt.FocusReason.MouseFocusReason
+            and QApplication.focusWidget() is self.pause_button
+        ):
             return
         if not self._switching and not self.start_button.isVisible():
             self._pause()
@@ -638,6 +779,9 @@ class MainWindow(QMainWindow):
                     and not self.start_button.isVisible()
                 ):
                     self._pause()
+                elif self.stack.currentWidget() == self.command_page:
+                    if not self.command_page.start_button.isVisible():
+                        self.command_page.pause()
         super().changeEvent(event)
 
     def _finish(self) -> None:

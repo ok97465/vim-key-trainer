@@ -1,0 +1,180 @@
+{
+  "schema_version": 1,
+  "content_version": 1,
+  "stage": "commands",
+  "id": "commands_movement",
+  "title": "기본 이동",
+  "description": "방향·단어·줄 경계를 오가며 대소문자와 숫자 0의 의미를 익힙니다.",
+  "difficulty": "beginner",
+  "tags": [
+    "movement",
+    "case"
+  ],
+  "display_count": 12,
+  "items": [
+    {
+      "id": "left",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "h"
+        }
+      ],
+      "meaning": "커서를 왼쪽 한 문자로 이동합니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "down",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "j"
+        }
+      ],
+      "meaning": "커서를 아래 한 줄로 이동합니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "up",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "k"
+        }
+      ],
+      "meaning": "커서를 위 한 줄로 이동합니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "right",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "l"
+        }
+      ],
+      "meaning": "커서를 오른쪽 한 문자로 이동합니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "word_forward",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "w"
+        }
+      ],
+      "meaning": "다음 단어 시작으로 이동합니다. 단어 구분은 Vim의 word 규칙을 따릅니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "word_backward",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "b"
+        }
+      ],
+      "meaning": "현재 또는 이전 단어의 시작으로 뒤로 이동합니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "line_start",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "0"
+        }
+      ],
+      "meaning": "현재 줄의 첫 문자로 이동합니다. 앞선 숫자 접두어가 없는 0은 이동 명령입니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "first_nonblank",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "^"
+        }
+      ],
+      "meaning": "현재 줄의 첫 공백 아닌 문자로 이동합니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "line_end",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "$"
+        }
+      ],
+      "meaning": "현재 줄의 마지막 문자로 이동합니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "first_line",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "g"
+        },
+        {
+          "kind": "char",
+          "value": "g"
+        }
+      ],
+      "meaning": "문서의 첫 줄로 이동합니다. 기본 startofline 설정에서는 첫 공백 아닌 문자에 놓입니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "last_line",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "G"
+        }
+      ],
+      "meaning": "문서의 마지막 줄로 이동합니다. 소문자 gg와 구별하세요.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "word_twice",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "2"
+        },
+        {
+          "kind": "char",
+          "value": "w"
+        }
+      ],
+      "meaning": "숫자 접두어 2를 적용해 단어 시작 이동을 두 번 합니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    }
+  ]
+}

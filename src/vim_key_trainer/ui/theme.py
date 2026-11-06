@@ -26,12 +26,20 @@ QPushButton:hover { background: #304157; border-color: #7a8da6; }
 QPushButton:focus { border: 2px solid #c3ef85; }
 QPushButton:pressed { background: #172231; }
 QPushButton:disabled { color: #748193; background: #1b2430; border-color: #293342; }
-QPushButton#primary { background: #c3ef85; color: #17220e; border-color: #c3ef85; }
-QPushButton#primary:hover { background: #d5ffa1; }
+QPushButton#primary, QPushButton[emphasized="true"] {
+    background: #c3ef85; color: #17220e; border-color: #c3ef85;
+}
+QPushButton#primary:hover, QPushButton[emphasized="true"]:hover { background: #d5ffa1; }
+QPushButton#primary:disabled, QPushButton[emphasized="true"]:disabled {
+    color: #748193; background: #1b2430; border-color: #293342;
+}
 QPushButton#nav {
     text-align: left; background: transparent; border-color: transparent;
 }
 QPushButton#nav:hover { background: #243041; }
+QPushButton#nav:checked {
+    background: #25382c; border-color: #60764a; color: #c3ef85;
+}
 QPushButton#nav:focus { border-color: #c3ef85; }
 QComboBox, QSpinBox {
     background: #19212d; border: 1px solid #425268; border-radius: 6px;

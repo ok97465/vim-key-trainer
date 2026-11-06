@@ -88,3 +88,26 @@ def test_zero_time_does_not_win_speed_comparison() -> None:
     repository.save(first)
     assert not repository.save(completed_result(seconds=0))
     assert repository.best_for(first) == first
+
+
+def test_measured_time_replaces_an_unmeasured_best_at_equal_accuracy() -> None:
+    repository = MemoryResultRepository()
+    unmeasured = completed_result(seconds=0)
+    assert repository.save(unmeasured)
+    measured = completed_result(seconds=5)
+    assert repository.save(measured)
+    assert repository.best_for(unmeasured) == measured
+    assert not repository.save(completed_result(seconds=0))
+    assert repository.best_for(unmeasured) == measured
+
+
+def test_symbol_stars_separate_game_rules_versions() -> None:
+    repository = MemoryResultRepository()
+    original = completed_result()
+    assert repository.save(original)
+    updated = replace(
+        completed_result(mistakes=1), game_rules_version=original.game_rules_version + 1
+    )
+    assert repository.save(updated)
+    assert repository.best_stars("numbers", original.game_rules_version) == 3
+    assert repository.best_stars("numbers", updated.game_rules_version) == 1

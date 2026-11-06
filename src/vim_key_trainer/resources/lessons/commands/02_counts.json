@@ -1,0 +1,210 @@
+{
+  "schema_version": 1,
+  "content_version": 1,
+  "stage": "commands",
+  "id": "commands_counts",
+  "title": "횟수와 삭제",
+  "description": "숫자 접두어와 삭제 연산자를 조합해 명령을 입력합니다.",
+  "difficulty": "beginner",
+  "tags": [
+    "count",
+    "delete"
+  ],
+  "display_count": 10,
+  "items": [
+    {
+      "id": "down_three",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "3"
+        },
+        {
+          "kind": "char",
+          "value": "j"
+        }
+      ],
+      "meaning": "아래로 세 줄 이동합니다. 3은 j에 적용되는 횟수입니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "right_ten",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "1"
+        },
+        {
+          "kind": "char",
+          "value": "0"
+        },
+        {
+          "kind": "char",
+          "value": "l"
+        }
+      ],
+      "meaning": "오른쪽으로 열 문자 이동합니다. 여기의 0은 숫자 접두어 10의 일부입니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "words_two",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "2"
+        },
+        {
+          "kind": "char",
+          "value": "w"
+        }
+      ],
+      "meaning": "다음 단어 시작으로 두 번 이동합니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "delete_character",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "x"
+        }
+      ],
+      "meaning": "현재 커서 아래의 문자 하나를 삭제합니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "delete_line",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "d"
+        },
+        {
+          "kind": "char",
+          "value": "d"
+        }
+      ],
+      "meaning": "현재 줄 전체를 삭제합니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "delete_two_lines",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "2"
+        },
+        {
+          "kind": "char",
+          "value": "d"
+        },
+        {
+          "kind": "char",
+          "value": "d"
+        }
+      ],
+      "meaning": "현재 줄부터 두 줄을 삭제합니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "delete_word",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "d"
+        },
+        {
+          "kind": "char",
+          "value": "w"
+        }
+      ],
+      "meaning": "현재 위치부터 다음 단어 시작 직전까지 삭제합니다. 줄 끝에서는 삭제 범위에 예외가 있습니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "delete_two_words",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "d"
+        },
+        {
+          "kind": "char",
+          "value": "2"
+        },
+        {
+          "kind": "char",
+          "value": "w"
+        }
+      ],
+      "meaning": "삭제 연산자 d에 2w 이동 범위를 적용합니다. 단어 시작 이동 두 번의 범위를 삭제합니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "multiply_counts",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "2"
+        },
+        {
+          "kind": "char",
+          "value": "d"
+        },
+        {
+          "kind": "char",
+          "value": "3"
+        },
+        {
+          "kind": "char",
+          "value": "w"
+        }
+      ],
+      "meaning": "연산자 횟수 2와 이동 횟수 3을 곱해 6w 범위를 삭제합니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    },
+    {
+      "id": "line_twenty_two",
+      "tokens": [
+        {
+          "kind": "char",
+          "value": "2"
+        },
+        {
+          "kind": "char",
+          "value": "2"
+        },
+        {
+          "kind": "char",
+          "value": "g"
+        },
+        {
+          "kind": "char",
+          "value": "g"
+        }
+      ],
+      "meaning": "사용자 표시 기준 22번째 줄로 이동합니다. 줄 번호는 1부터 시작합니다.",
+      "start_mode": "Normal",
+      "follow_up": "이 항목은 여기서 완결됩니다. 다음 항목은 독립된 문맥에서 시작합니다.",
+      "execution_support": "typing_only"
+    }
+  ]
+}
