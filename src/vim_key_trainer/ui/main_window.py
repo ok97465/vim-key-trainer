@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QProgressBar,
+    QPushButton,
     QSpinBox,
     QStackedWidget,
     QVBoxLayout,
@@ -57,6 +58,7 @@ from vim_key_trainer.ui.components import button, label, scroll_page
 from vim_key_trainer.ui.edit_catalog import EditCatalogPage
 from vim_key_trainer.ui.edit_practice import EditPracticePage
 from vim_key_trainer.ui.qt_input import IGNORED_INPUT_MESSAGES, NormalizedKey
+from vim_key_trainer.ui.vim_cheatsheet import VimCheatSheetPage
 from vim_key_trainer.ui.widgets.practice_input import PracticeInput
 
 _SHIFT_KEYS = dict(zip('!@#$%^&*()_+{}|:"<>?~', "1234567890-=[]\\;',./`", strict=True))
@@ -95,6 +97,9 @@ class MainWindow(QMainWindow):
         self._lesson_stars: dict[str, QLabel] = {}
         self._command_lesson_stars: dict[tuple[str, int], QLabel] = {}
         self._category = "numbers"
+        self._cheatsheet_return_page: QWidget | None = None
+        self._cheatsheet_return_focus: QWidget | None = None
+        self._cheatsheet_return_nav: QPushButton | None = None
 
         root = QWidget()
         self.setCentralWidget(root)
@@ -125,6 +130,8 @@ class MainWindow(QMainWindow):
         self.result_page = self._make_result()
         self.diagnostic_page = self._make_diagnostics()
         self.settings_page = self._make_settings()
+        self.cheatsheet_page = VimCheatSheetPage()
+        self.cheatsheet_page.return_requested.connect(self.return_from_cheatsheet)
         for page in (
             self.numbers_page,
             self.commands_menu_page,
@@ -135,6 +142,7 @@ class MainWindow(QMainWindow):
             self.result_page,
             self.diagnostic_page,
             self.settings_page,
+            self.cheatsheet_page,
         ):
             self.stack.addWidget(page)
         self.timer = QTimer(self)
@@ -163,6 +171,8 @@ class MainWindow(QMainWindow):
         self.commands_button.setAccessibleName("navCommands")
         self.editing_button = button("문서 수정 연습", "nav")
         self.editing_button.setAccessibleName("navEditing")
+        self.cheatsheet_button = button("Vim CheatSheet", "nav")
+        self.cheatsheet_button.setAccessibleName("navCheatSheet")
         self.diagnostic_button = button("⌨   키 입력 진단", "nav")
         self.diagnostic_button.setAccessibleName("navDiagnostics")
         self.settings_button = button("⚙   연습 설정", "nav")
@@ -172,6 +182,7 @@ class MainWindow(QMainWindow):
             (self.numbers_button, self.show_numbers),
             (self.commands_button, self.show_commands_menu),
             (self.editing_button, self.show_editing),
+            (self.cheatsheet_button, self.show_cheatsheet),
             (self.diagnostic_button, self.show_diagnostics),
             (self.settings_button, self.show_settings),
         ):
@@ -651,6 +662,9 @@ class MainWindow(QMainWindow):
         self._refresh_edit_weight_preview()
 
     def _navigate(self, page: QWidget) -> None:
+        self._cheatsheet_return_page = None
+        self._cheatsheet_return_focus = None
+        self._cheatsheet_return_nav = None
         self.statusBar().clearMessage()
         self.statusBar().hide()
         self._switching = True
@@ -736,6 +750,94 @@ class MainWindow(QMainWindow):
     def show_settings(self) -> None:
         self._navigate(self.settings_page)
         self.settings_button.setChecked(True)
+
+    def show_cheatsheet(self) -> None:
+        page = self.stack.currentWidget()
+        if page is None or page is self.cheatsheet_page:
+            self.cheatsheet_page.focus_entry()
+            return
+        self._cheatsheet_return_page = page
+        current_focus = QApplication.focusWidget()
+        self._cheatsheet_return_focus = (
+            current_focus
+            if current_focus is not None and page.isAncestorOf(current_focus)
+            else None
+        )
+        navigation = (
+            (self.commands_button, (self.commands_menu_page, self.command_page)),
+            (self.editing_button, (self.editing_page, self.edit_practice)),
+            (self.settings_button, (self.settings_page,)),
+            (self.diagnostic_button, (self.diagnostic_page,)),
+        )
+        self._cheatsheet_return_nav = next(
+            (nav for nav, pages in navigation if page in pages),
+            self.numbers_button,
+        )
+        practice_page = page in (
+            self.practice_page,
+            self.command_page,
+            self.edit_practice,
+        )
+        self.cheatsheet_page.return_button.setText(
+            "← 연습으로 돌아가기" if practice_page else "← 이전 화면으로"
+        )
+        if page is self.practice_page and not self.start_button.isVisible():
+            self._pause()
+        elif (
+            page is self.command_page and not self.command_page.start_button.isVisible()
+        ):
+            self.command_page.pause()
+        elif page is self.edit_practice:
+            self.edit_practice.pause()
+        self.stack.setCurrentWidget(self.cheatsheet_page)
+        self.cheatsheet_button.setChecked(True)
+        self.cheatsheet_page.focus_entry()
+
+    def return_from_cheatsheet(self) -> None:
+        page = self._cheatsheet_return_page
+        navigation = self._cheatsheet_return_nav
+        focus = self._cheatsheet_return_focus
+        self._cheatsheet_return_page = None
+        self._cheatsheet_return_focus = None
+        self._cheatsheet_return_nav = None
+        if page is None or navigation is None:
+            self.show_home()
+            return
+        self.stack.setCurrentWidget(page)
+        navigation.setChecked(True)
+        practice: MainWindow | CommandPracticePage | EditPracticePage | None = None
+        if page is self.practice_page:
+            practice = self
+        elif page is self.command_page:
+            practice = self.command_page
+        elif page is self.edit_practice:
+            practice = self.edit_practice
+        if page is self.result_page:
+            focus = self.result_new_button
+        elif (
+            practice is not None
+            and practice.session is not None
+            and practice.session.state == SessionState.COMPLETED
+        ):
+            if isinstance(practice, CommandPracticePage):
+                focus = practice.new_button
+            elif isinstance(practice, EditPracticePage):
+                focus = (
+                    practice.result_new_button
+                    if practice.result_new_button.isEnabled()
+                    else practice.result_retry_button
+                )
+        elif practice is not None and practice.start_button.isVisible():
+            focus = practice.start_button
+        elif (
+            practice is not None
+            and practice.session is not None
+            and practice.session.state == SessionState.PAUSED
+        ):
+            focus = practice.pause_button
+        if focus is None or not focus.isVisible() or not focus.isEnabled():
+            focus = navigation
+        focus.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def prepare_practice(
         self, exercise_id: str, spec: PracticeSpec | None = None
