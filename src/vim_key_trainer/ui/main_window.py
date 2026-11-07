@@ -4,7 +4,7 @@
 from secrets import randbelow
 
 # Third party imports
-from PySide6.QtCore import QEvent, QSignalBlocker, Qt, QTimer
+from PySide6.QtCore import QEvent, QSignalBlocker, QSize, Qt, QTimer
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -51,6 +51,7 @@ from vim_key_trainer.services.result_repository import (
     ResultRepository,
 )
 from vim_key_trainer.services.session_service import PracticeSession
+from vim_key_trainer.ui.branding import AUTHOR, WINDOW_TITLE, load_icon
 from vim_key_trainer.ui.command_practice import CommandPracticePage
 from vim_key_trainer.ui.components import button, label, scroll_page
 from vim_key_trainer.ui.edit_catalog import EditCatalogPage
@@ -77,7 +78,8 @@ def percentage(value: float | None) -> str:
 class MainWindow(QMainWindow):
     def __init__(self, repository: ResultRepository | None = None) -> None:
         super().__init__()
-        self.setWindowTitle("vim-key-trainer · 매일 조금씩, 손에 익는 Vim")
+        self.setWindowTitle(WINDOW_TITLE)
+        self.setWindowIcon(load_icon("ok97465"))
         self.resize(1200, 800)
         self.setMinimumSize(1200, 800)
         self.session: PracticeSession | None = None
@@ -185,7 +187,17 @@ class MainWindow(QMainWindow):
         self.storage_retry_button.clicked.connect(self._retry_storage)
         self.storage_retry_button.hide()
         layout.addWidget(self.storage_retry_button)
-        layout.addWidget(label("LOCAL · OFFLINE\nv0.1  /  기본 연습", "muted"))
+        author = QHBoxLayout()
+        author.setSpacing(8)
+        author_icon = QLabel()
+        author_icon.setPixmap(
+            load_icon("ok97465").pixmap(QSize(28, 28), author_icon.devicePixelRatioF())
+        )
+        author_icon.setFixedSize(28, 28)
+        author.addWidget(author_icon)
+        author.addWidget(label(f"{AUTHOR}", "muted"))
+        author.addStretch()
+        layout.addLayout(author)
         return sidebar
 
     def _page(

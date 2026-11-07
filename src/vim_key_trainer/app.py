@@ -10,15 +10,25 @@ from PySide6.QtWidgets import QApplication
 # Local imports
 from vim_key_trainer.services.application_storage import open_application_repository
 from vim_key_trainer.services.sqlite_repository import SqliteResultRepository
+from vim_key_trainer.ui.branding import (
+    APP_NAME,
+    AUTHOR,
+    load_icon,
+    set_windows_app_id,
+)
 from vim_key_trainer.ui.main_window import MainWindow
 from vim_key_trainer.ui.theme import STYLESHEET
 
 
 def main() -> int:
+    set_windows_app_id()
     # Qt 기본 macOS modifier 매핑을 어댑터에서 명시적으로 정규화한다.
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_DontUseNativeMenuBar)
     app = QApplication(sys.argv)
-    app.setApplicationName("vim-key-trainer")
+    app.setApplicationName(APP_NAME)
+    app.setApplicationDisplayName(APP_NAME)
+    app.setOrganizationName(AUTHOR)
+    app.setWindowIcon(load_icon("vim-key-trainer"))
     app.setStyle("Fusion")
     app.setStyleSheet(STYLESHEET)
     repository, warning = open_application_repository()
