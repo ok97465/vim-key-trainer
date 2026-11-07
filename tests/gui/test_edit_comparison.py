@@ -5,7 +5,7 @@ from difflib import SequenceMatcher
 
 # Third party imports
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QFontMetricsF
 from pytestqt.qtbot import QtBot
 
@@ -197,20 +197,42 @@ def test_stationary_cursor_updates_preserve_manual_goal_scroll(qtbot: QtBot) -> 
     assert bars[1].value() < position[1]
 
 
-def test_new_document_discards_padding_for_previous_viewport(qtbot: QtBot) -> None:
+def test_manual_scroll_past_file_end_tracks_viewport_and_replacement_document(
+    qtbot: QtBot,
+) -> None:
     comparison = EditComparison()
     qtbot.addWidget(comparison)
     comparison.resize(760, 900)
     lines = tuple(f"line {index}" for index in range(100))
-    state = EditorState(lines, row=99, viewport_top=99)
+    state = EditorState(lines, row=99)
     comparison.show_documents(state, state)
     comparison.show()
     qtbot.waitExposed(comparison)
-    comparison.show_current(state, follow_viewport=True)
-    assert comparison.practice_input.bottom_padding > 0
-    comparison.show_documents(EditorState(("new",)), EditorState(("goal",)))
-    assert comparison.practice_input.bottom_padding == 0
-    assert comparison.practice_input.minimumHeight() == 240
+    document = comparison.practice_input
+    viewport = comparison.current_scroll.viewport()
+    scroll_bar = comparison.current_scroll.verticalScrollBar()
+
+    def final_line_is_at_top() -> bool:
+        origin = document.mapTo(viewport, QPoint())
+        return abs(document.cursor_rect.translated(origin).top() - 16) <= 1
+
+    assert not comparison.guide_overlay.isVisible()
+    scroll_bar.setValue(scroll_bar.maximum())
+    qtbot.waitUntil(final_line_is_at_top)
+    original_height = viewport.height()
+    comparison.resize(760, 420)
+    qtbot.waitUntil(lambda: viewport.height() < original_height)
+    scroll_bar.setValue(scroll_bar.maximum())
+    qtbot.waitUntil(final_line_is_at_top)
+    assert document.editor_state is state
+    assert comparison.goal_document.editor_state is state
+
+    current, goal = EditorState(("new",)), EditorState(("goal",))
+    comparison.show_documents(current, goal)
+    qtbot.waitUntil(lambda: scroll_bar.maximum() == 0)
+    assert scroll_bar.value() == 0
+    assert document.editor_state is current
+    assert comparison.goal_document.editor_state is goal
 
 
 def test_target_highlights_update_as_repair_is_completed_without_mutating_goal(

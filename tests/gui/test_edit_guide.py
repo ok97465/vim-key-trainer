@@ -1,7 +1,8 @@
 """반투명 가이드는 문서 위에서 진행만 표시하고 입력은 가로채지 않는다."""
 
 # Third party imports
-from PySide6.QtCore import QRectF, Qt
+import pytest
+from PySide6.QtCore import QPoint, QRectF, Qt
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
@@ -22,6 +23,69 @@ def make_comparison(qtbot: QtBot) -> EditComparison:
     comparison.show()
     qtbot.waitExposed(comparison)
     return comparison
+
+
+def cursor_clears_guide(comparison: EditComparison) -> bool:
+    document = comparison.practice_input
+    origin = document.mapTo(comparison.current_scroll.viewport(), QPoint())
+    cursor = document.cursor_rect.translated(origin)
+    return (
+        cursor.top() >= 0
+        and cursor.bottom() <= comparison.guide_overlay.geometry().top() - 8
+    )
+
+
+@pytest.mark.parametrize("follow_viewport", [False, True])
+def test_final_line_scrolls_above_guide_without_changing_documents(
+    qtbot: QtBot, follow_viewport: bool
+) -> None:
+    comparison = make_comparison(qtbot)
+    goal = comparison.goal_document.editor_state
+    comparison.show_guide(
+        (KeyToken("char", "G"),), 0, description="마지막 줄로 이동", progress="1/2 단계"
+    )
+    last_line = EditorState(goal.lines, row=len(goal.lines) - 1, viewport_top=70)
+    comparison.show_current(last_line, follow_viewport=follow_viewport)
+
+    qtbot.waitUntil(lambda: cursor_clears_guide(comparison))
+    assert comparison.practice_input.editor_state is last_line
+    assert comparison.goal_document.editor_state is goal
+
+
+def test_appearing_and_resumed_guide_reveals_existing_final_line(qtbot: QtBot) -> None:
+    comparison = make_comparison(qtbot)
+    state = EditorState(comparison.practice_input.editor_state.lines, row=79)
+    comparison.show_current(state)
+    comparison.show_guide(
+        (KeyToken("char", "x"),), 0, description="마지막 글자 삭제", progress="2/2 단계"
+    )
+    qtbot.waitUntil(lambda: cursor_clears_guide(comparison))
+
+    comparison.set_paused(True)
+    comparison.current_scroll.verticalScrollBar().setValue(0)
+    comparison.set_paused(False)
+    qtbot.waitUntil(lambda: cursor_clears_guide(comparison))
+    assert comparison.guide_overlay.isVisible()
+    assert comparison.practice_input.editor_state is state
+
+
+def test_final_line_keeps_guide_clearance_after_font_and_viewport_changes(
+    qtbot: QtBot,
+) -> None:
+    comparison = make_comparison(qtbot)
+    state = EditorState(comparison.practice_input.editor_state.lines, row=79)
+    goal = comparison.goal_document.editor_state
+    comparison.show_guide(
+        (KeyToken("char", "x"),), 0, description="마지막 글자 삭제", progress="2/2 단계"
+    )
+    comparison.show_current(state)
+    comparison.set_font_size(28)
+    qtbot.waitUntil(lambda: cursor_clears_guide(comparison))
+
+    comparison.resize(840, 180)
+    qtbot.waitUntil(lambda: cursor_clears_guide(comparison))
+    assert comparison.practice_input.editor_state is state
+    assert comparison.goal_document.editor_state is goal
 
 
 def test_accepted_keys_fade_without_spacing_or_changing_next_token(

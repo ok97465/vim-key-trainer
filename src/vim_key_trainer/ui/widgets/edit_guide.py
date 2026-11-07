@@ -9,6 +9,7 @@ from PySide6.QtGui import (
     QFontMetricsF,
     QPainter,
     QPaintEvent,
+    QTextLayout,
 )
 from PySide6.QtWidgets import QWidget
 
@@ -81,10 +82,10 @@ class EditGuideOverlay(QWidget):
         if viewport is None:
             return
         margin = min(10, max(0, viewport.width() // 12))
-        height = min(68, viewport.height())
+        height = min(40, viewport.height())
         self.setGeometry(
             margin,
-            max(0, viewport.height() - height - margin),
+            max(0, viewport.height() - height - 4),
             max(1, viewport.width() - 2 * margin),
             height,
         )
@@ -102,18 +103,37 @@ class EditGuideOverlay(QWidget):
                 font.setPointSizeF(max(1.0, 18 * available / width))
         return font
 
+    def _content_rects(self) -> tuple[QRectF, QRectF]:
+        available = max(1.0, self.width() - 24.0)
+        metrics = QFontMetricsF(self._command_font())
+        active = min(self.completed, max(0, len(self.keys) - 1))
+        next_width = (
+            metrics.horizontalAdvance(self.keys[active].display) if self.keys else 0
+        )
+        # Reserve symmetric side space so the command stays at the bar's center.
+        required = min(available, max(80.0, next_width))
+        details_width = min(
+            180.0, available * 0.3, max(0.0, (available - required) / 2 - 8)
+        )
+        inset = details_width + 8 if details_width else 0.0
+        return (
+            QRectF(12 + inset, 0, available - 2 * inset, self.height()),
+            QRectF(self.width() - 12 - details_width, 0, details_width, self.height()),
+        )
+
     def _token_rects(self) -> tuple[QRectF, ...]:
         metrics = QFontMetricsF(self._command_font())
         widths = [metrics.horizontalAdvance(token.display) for token in self.keys]
-        available = max(1, self.width() - 24)
+        command_rect, _ = self._content_rects()
+        available = command_rect.width()
         active = min(self.completed, max(0, len(widths) - 1))
         before = sum(widths[:active])
         # Keep some preceding input visible while fitting the entire next logical key.
         offset = max(0.0, before + (widths[active] if widths else 0) - available)
-        x = 12.0 - offset
+        x = command_rect.left() + max(0.0, (available - sum(widths)) / 2) - offset
         boxes: list[QRectF] = []
         for width in widths:
-            boxes.append(QRectF(x, 7, width, 32))
+            boxes.append(QRectF(x, 0, width, self.height()))
             x += width
         return tuple(boxes)
 
@@ -128,8 +148,9 @@ class EditGuideOverlay(QWidget):
         painter.setBrush(QColor(12, 19, 28, 170))
         painter.drawRoundedRect(QRectF(self.rect()), 8, 8)
         painter.setFont(self._command_font())
+        command_rect, details_rect = self._content_rects()
         painter.save()
-        painter.setClipRect(QRectF(12, 4, max(1, self.width() - 24), 36))
+        painter.setClipRect(command_rect)
         for index, (token, box) in enumerate(
             zip(self.keys, self._token_rects(), strict=True)
         ):
@@ -150,11 +171,22 @@ class EditGuideOverlay(QWidget):
         details = " · ".join(
             value for value in (self.progress, self.description) if value
         )
-        details = painter.fontMetrics().elidedText(
-            details, Qt.TextElideMode.ElideRight, max(1, self.width() - 24)
-        )
+        if details_rect.width() < 1 or not details:
+            return
+        text_layout = QTextLayout(details, font)
+        text_layout.beginLayout()
+        first_line = text_layout.createLine()
+        first_line.setLineWidth(details_rect.width())
+        split = first_line.textLength()
+        text_layout.endLayout()
+        remaining = details[split:].strip()
+        details = details[:split].rstrip()
+        if remaining:
+            details += "\n" + painter.fontMetrics().elidedText(
+                remaining, Qt.TextElideMode.ElideRight, int(details_rect.width())
+            )
         painter.drawText(
-            QRectF(12, 43, max(1, self.width() - 24), 18),
+            details_rect,
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
             details,
         )

@@ -2,6 +2,7 @@
 
 # Standard library imports
 from collections import defaultdict
+from math import ceil
 
 # Third party imports
 from PySide6.QtCore import QRectF, Qt
@@ -57,7 +58,7 @@ class EditDocument(PracticeInput):
         self.setAcceptDrops(False)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.PreventContextMenu)
         self.read_only = read_only
-        self.bottom_padding = 0
+        self._viewport_height = 0
         self.editor_state = EditorState(("",))
         self.language: DocumentLanguage = "text"
         self.syntax_spans: tuple[TextSpan, ...] = ()
@@ -86,7 +87,7 @@ class EditDocument(PracticeInput):
             self.change_spans = ()
             self._changes_by_row = {}
         self.editor_state = state
-        layout_key = (state.lines, self.font_size, self.bottom_padding)
+        layout_key = (state.lines, self.font_size, self._viewport_height)
         if layout_key != self._layout_key:
             # 커서·대기 명령만 바뀔 때는 문서 전체의 글자 폭을 다시 재지 않는다.
             metrics = self.document_metrics
@@ -94,8 +95,9 @@ class EditDocument(PracticeInput):
                 int(max(metrics.horizontalAdvance(line) for line in state.lines) + 100),
                 max(
                     240,
-                    int((len(state.lines) + 1) * metrics.lineSpacing() + 24)
-                    + self.bottom_padding,
+                    int((len(state.lines) + 1) * metrics.lineSpacing() + 24),
+                    ceil((len(state.lines) - 1) * metrics.lineSpacing())
+                    + self._viewport_height,
                 ),
             )
             self._layout_key = layout_key
@@ -104,6 +106,13 @@ class EditDocument(PracticeInput):
             + "\n".join(state.lines)
         )
         self.update()
+
+    def set_viewport_height(self, height: int) -> None:
+        """원문을 늘리지 않고 마지막 줄을 뷰포트 상단까지 스크롤하게 한다."""
+        height = max(0, height)
+        if height != self._viewport_height:
+            self._viewport_height = height
+            self.show_state(self.editor_state)
 
     def set_language(self, language: DocumentLanguage) -> None:
         self.syntax_spans = lexical_spans(self.editor_state.lines, language)

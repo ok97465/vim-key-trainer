@@ -4,7 +4,7 @@
 from math import ceil
 
 # Third party imports
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -42,6 +42,7 @@ class EditComparison(QWidget):
         self.current_scroll = self._scroll_area(self.practice_input)
         self.goal_scroll = self._scroll_area(self.goal_document)
         self.guide_overlay = EditGuideOverlay(self.current_scroll.viewport())
+        self.current_scroll.viewport().installEventFilter(self)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)
@@ -69,7 +70,6 @@ class EditComparison(QWidget):
         return area
 
     def show_documents(self, current: EditorState, goal: EditorState) -> None:
-        self.practice_input.bottom_padding = 0
         self._goal_position = None
         self.goal_document.show_state(goal)
         self.current_scroll.verticalScrollBar().setValue(0)
@@ -81,7 +81,19 @@ class EditComparison(QWidget):
     @property
     def viewport_rows(self) -> int:
         spacing = self.practice_input.document_metrics.lineSpacing()
-        return max(1, int((self.current_scroll.viewport().height() - 32) / spacing))
+        return max(
+            1,
+            int(
+                (self.current_scroll.viewport().height() - self._guide_clearance - 32)
+                / spacing
+            ),
+        )
+
+    @property
+    def _guide_clearance(self) -> int:
+        if self.guide_overlay.isHidden():
+            return 0
+        return self.current_scroll.viewport().height() - self.guide_overlay.y() + 8
 
     @property
     def viewport_top(self) -> int:
@@ -94,16 +106,7 @@ class EditComparison(QWidget):
     def show_current(
         self, state: EditorState, *, follow_viewport: bool = False
     ) -> None:
-        if follow_viewport:
-            # zt can place even the final document line at the top of the view.
-            self.practice_input.bottom_padding = max(
-                0,
-                round(
-                    self.current_scroll.viewport().height()
-                    - 2 * self.practice_input.document_metrics.lineSpacing()
-                    - 24
-                ),
-            )
+        self.practice_input.set_viewport_height(self.current_scroll.viewport().height())
         self.practice_input.show_state(state)
         previous_count = self.remaining_changes
         self.diff = compare_documents(
@@ -120,11 +123,7 @@ class EditComparison(QWidget):
                     * self.practice_input.document_metrics.lineSpacing()
                 )
             )
-            self._ensure_cursor_visible()
-        else:
-            self.current_scroll.ensureVisible(
-                int(cursor.center().x()), int(cursor.center().y()), 24, 24
-            )
+        self._ensure_cursor_visible()
         goal_position = (self.diff.goal_rows[state.row], state.column)
         if goal_position != self._goal_position:
             # 오타·대기 명령의 갱신은 사용자가 따로 스크롤한 목표를 되돌리지 않는다.
@@ -158,6 +157,8 @@ class EditComparison(QWidget):
         self._ensure_cursor_visible()
 
     def _ensure_cursor_visible(self) -> None:
+        clearance = self._guide_clearance
+        self.practice_input.set_viewport_height(self.current_scroll.viewport().height())
         cursor = self.practice_input.cursor_rect
         self.current_scroll.ensureVisible(
             int(cursor.center().x()),
@@ -165,16 +166,29 @@ class EditComparison(QWidget):
             24,
             ceil(cursor.height() / 2) + 1,
         )
+        if clearance:
+            scroll_bar = self.current_scroll.verticalScrollBar()
+            visible_bottom = self.current_scroll.viewport().height() - clearance
+            scroll_bar.setValue(
+                max(scroll_bar.value(), ceil(cursor.bottom() - visible_bottom))
+            )
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         # The scroll area's layout has its new height after this resize event.
         QTimer.singleShot(0, self._ensure_cursor_visible)
 
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if isinstance(event, QResizeEvent):
+            self.practice_input.set_viewport_height(event.size().height())
+        return super().eventFilter(watched, event)
+
     def set_paused(self, paused: bool) -> None:
         self.practice_input.paused = paused
         self.practice_input.update()
         self.guide_overlay.set_paused(paused)
+        if not paused:
+            self._ensure_cursor_visible()
 
     def show_guide(
         self,
@@ -187,6 +201,8 @@ class EditComparison(QWidget):
         self.guide_overlay.show_guide(
             keys, completed, description=description, progress=progress
         )
+        self._ensure_cursor_visible()
 
     def clear_guide(self) -> None:
         self.guide_overlay.clear_guide()
+        self._ensure_cursor_visible()
