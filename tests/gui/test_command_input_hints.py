@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 # Standard library imports
+import sys
 from dataclasses import dataclass, replace
 
 # Third party imports
 import pytest
-from PySide6.QtCore import QEvent, QRectF
+from PySide6.QtCore import QEvent, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QPainter
 from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
@@ -44,6 +45,26 @@ def items(*, prefix: str = "뜻") -> tuple[CommandItem, ...]:
         )
         for index in range(8)
     )
+
+
+def test_control_v_is_scored_only_when_it_is_the_actual_target(qtbot: QtBot) -> None:
+    widget = CommandInput()
+    qtbot.addWidget(widget)
+    received: list[NormalizedKey] = []
+    widget.key_received.connect(received.append)
+    commands = (replace(items()[0], tokens=(KeyToken("chord", "ctrl+v"),)),)
+    widget.show_commands(commands, 0, 0, 8)
+    modifier = (
+        Qt.KeyboardModifier.MetaModifier
+        if sys.platform == "darwin"
+        else Qt.KeyboardModifier.ControlModifier
+    )
+    qtbot.keyClick(widget, Qt.Key.Key_V, modifier)
+    assert received[-1].token == KeyToken("chord", "ctrl+v")
+    widget.show_commands(items(), 0, 0, 8)
+    qtbot.keyClick(widget, Qt.Key.Key_V, modifier)
+    assert received[-1].token is None
+    assert received[-1].reason == "paste"
 
 
 @pytest.fixture

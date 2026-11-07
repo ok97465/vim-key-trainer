@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "content_version": 1,
+  "stage": "editing",
+  "id": "editing_undo",
+  "title": "삭제 후 실행 취소",
+  "description": "x로 첫 글자를 지운 뒤 u로 복원합니다. 시작과 목표가 같아도 전체 가이드를 수행해야 하는 가이드 전용 과제입니다.",
+  "initial": {
+    "lines": [
+      "hello"
+    ],
+    "row": 0,
+    "column": 0,
+    "mode": "normal"
+  },
+  "goal": {
+    "lines": [
+      "hello"
+    ]
+  },
+  "allowed_commands": [
+    "x",
+    "u",
+    "ctrl+r"
+  ],
+  "guide": [
+    {
+      "text": "x로 첫 글자를 삭제합니다.",
+      "keys": [
+        {
+          "kind": "char",
+          "value": "x"
+        }
+      ],
+      "expected": {
+        "lines": [
+          "ello"
+        ],
+        "row": 0,
+        "column": 0,
+        "mode": "normal"
+      }
+    },
+    {
+      "text": "u로 삭제를 실행 취소해 원래 문서를 복원합니다.",
+      "keys": [
+        {
+          "kind": "char",
+          "value": "u"
+        }
+      ],
+      "expected": {
+        "lines": [
+          "hello"
+        ],
+        "row": 0,
+        "column": 0,
+        "mode": "normal"
+      }
+    }
+  ],
+  "baseline": {
+    "version": 1,
+    "keys": [
+      {
+        "kind": "char",
+        "value": "x"
+      },
+      {
+        "kind": "char",
+        "value": "u"
+      }
+    ],
+    "key_count": 2
+  },
+  "free_enabled": false
+}

@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "content_version": 1,
+  "stage": "editing",
+  "id": "editing_delete_line",
+  "title": "불필요한 줄 삭제",
+  "description": "가운데 remove me 줄을 삭제하고 나머지 두 줄을 유지합니다.",
+  "initial": {
+    "lines": [
+      "alpha",
+      "remove me",
+      "omega"
+    ],
+    "row": 0,
+    "column": 0,
+    "mode": "normal"
+  },
+  "goal": {
+    "lines": [
+      "alpha",
+      "omega"
+    ]
+  },
+  "allowed_commands": [
+    "h",
+    "j",
+    "k",
+    "l",
+    "w",
+    "b",
+    "0",
+    "^",
+    "$",
+    "gg",
+    "G",
+    "dd",
+    "u",
+    "ctrl+r"
+  ],
+  "guide": [
+    {
+      "text": "j로 삭제할 줄로 이동합니다.",
+      "keys": [
+        {
+          "kind": "char",
+          "value": "j"
+        }
+      ],
+      "expected": {
+        "lines": [
+          "alpha",
+          "remove me",
+          "omega"
+        ],
+        "row": 1,
+        "column": 0,
+        "mode": "normal"
+      }
+    },
+    {
+      "text": "dd로 현재 줄을 삭제합니다.",
+      "keys": [
+        {
+          "kind": "char",
+          "value": "d"
+        },
+        {
+          "kind": "char",
+          "value": "d"
+        }
+      ],
+      "expected": {
+        "lines": [
+          "alpha",
+          "omega"
+        ],
+        "row": 1,
+        "column": 0,
+        "mode": "normal"
+      }
+    }
+  ],
+  "baseline": {
+    "version": 1,
+    "keys": [
+      {
+        "kind": "char",
+        "value": "j"
+      },
+      {
+        "kind": "char",
+        "value": "d"
+      },
+      {
+        "kind": "char",
+        "value": "d"
+      }
+    ],
+    "key_count": 3
+  },
+  "free_enabled": true
+}

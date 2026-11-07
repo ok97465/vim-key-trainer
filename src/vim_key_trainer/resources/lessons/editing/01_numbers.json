@@ -1,0 +1,169 @@
+{
+  "schema_version": 1,
+  "content_version": 1,
+  "stage": "editing",
+  "id": "editing_numbers",
+  "title": "숫자 한 자리 수정",
+  "description": "timeout의 30을 80으로 바꿉니다. 기준 풀이는 단어 이동을 이용하며, 더 짧은 유효한 풀이도 통과합니다.",
+  "initial": {
+    "lines": [
+      "set timeout = 30"
+    ],
+    "row": 0,
+    "column": 0,
+    "mode": "normal"
+  },
+  "goal": {
+    "lines": [
+      "set timeout = 80"
+    ]
+  },
+  "allowed_commands": [
+    "h",
+    "j",
+    "k",
+    "l",
+    "w",
+    "b",
+    "0",
+    "^",
+    "$",
+    "gg",
+    "G",
+    "x",
+    "i",
+    "a",
+    "u",
+    "ctrl+r"
+  ],
+  "guide": [
+    {
+      "text": "w로 timeout 시작으로 이동합니다.",
+      "keys": [
+        {
+          "kind": "char",
+          "value": "w"
+        }
+      ],
+      "expected": {
+        "lines": [
+          "set timeout = 30"
+        ],
+        "row": 0,
+        "column": 4,
+        "mode": "normal"
+      }
+    },
+    {
+      "text": "w로 등호 앞으로 이동합니다.",
+      "keys": [
+        {
+          "kind": "char",
+          "value": "w"
+        }
+      ],
+      "expected": {
+        "lines": [
+          "set timeout = 30"
+        ],
+        "row": 0,
+        "column": 12,
+        "mode": "normal"
+      }
+    },
+    {
+      "text": "w로 숫자의 첫 자리로 이동합니다.",
+      "keys": [
+        {
+          "kind": "char",
+          "value": "w"
+        }
+      ],
+      "expected": {
+        "lines": [
+          "set timeout = 30"
+        ],
+        "row": 0,
+        "column": 14,
+        "mode": "normal"
+      }
+    },
+    {
+      "text": "x로 3을 삭제합니다.",
+      "keys": [
+        {
+          "kind": "char",
+          "value": "x"
+        }
+      ],
+      "expected": {
+        "lines": [
+          "set timeout = 0"
+        ],
+        "row": 0,
+        "column": 14,
+        "mode": "normal"
+      }
+    },
+    {
+      "text": "i로 8을 입력하고 실제 Esc로 Normal 모드에 돌아옵니다.",
+      "keys": [
+        {
+          "kind": "char",
+          "value": "i"
+        },
+        {
+          "kind": "char",
+          "value": "8"
+        },
+        {
+          "kind": "special",
+          "value": "esc"
+        }
+      ],
+      "expected": {
+        "lines": [
+          "set timeout = 80"
+        ],
+        "row": 0,
+        "column": 14,
+        "mode": "normal"
+      }
+    }
+  ],
+  "baseline": {
+    "version": 1,
+    "keys": [
+      {
+        "kind": "char",
+        "value": "w"
+      },
+      {
+        "kind": "char",
+        "value": "w"
+      },
+      {
+        "kind": "char",
+        "value": "w"
+      },
+      {
+        "kind": "char",
+        "value": "x"
+      },
+      {
+        "kind": "char",
+        "value": "i"
+      },
+      {
+        "kind": "char",
+        "value": "8"
+      },
+      {
+        "kind": "special",
+        "value": "esc"
+      }
+    ],
+    "key_count": 7
+  },
+  "free_enabled": true
+}

@@ -8,6 +8,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 # Local imports
+from vim_key_trainer.services.application_storage import open_application_repository
+from vim_key_trainer.services.sqlite_repository import SqliteResultRepository
 from vim_key_trainer.ui.main_window import MainWindow
 from vim_key_trainer.ui.theme import STYLESHEET
 
@@ -19,6 +21,14 @@ def main() -> int:
     app.setApplicationName("vim-key-trainer")
     app.setStyle("Fusion")
     app.setStyleSheet(STYLESHEET)
-    window = MainWindow()
+    repository, warning = open_application_repository()
+    window = MainWindow(repository)
+    if warning:
+        window.show_storage_warning(warning)
     window.show()
-    return app.exec()
+    try:
+        return app.exec()
+    finally:
+        if isinstance(repository, SqliteResultRepository):
+            repository.retry_pending()
+            repository.close()

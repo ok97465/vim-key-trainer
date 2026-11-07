@@ -2,6 +2,7 @@
 
 # Third party imports
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
@@ -19,8 +20,33 @@ def label(text: str, role: str = "", *, wrap: bool = False) -> QLabel:
     return widget
 
 
-def button(text: str, name: str = "", *, primary: bool = False) -> QPushButton:
-    widget = QPushButton(text)
+class _EnterButton(QPushButton):
+    """포커스된 동작만 Enter 한 번으로 실행하고 누름 반복·키 해제는 무시한다."""
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter}:
+            modifiers = event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier
+            if not event.isAutoRepeat() and modifiers == Qt.KeyboardModifier.NoModifier:
+                self.click()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event: QKeyEvent) -> None:
+        if event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter}:
+            event.accept()
+            return
+        super().keyReleaseEvent(event)
+
+
+def button(
+    text: str,
+    name: str = "",
+    *,
+    primary: bool = False,
+    enter_activates: bool = False,
+) -> QPushButton:
+    widget = _EnterButton(text) if enter_activates else QPushButton(text)
     widget.setObjectName("primary" if primary else name)
     if name:
         widget.setAccessibleName(name)

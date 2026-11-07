@@ -10,6 +10,7 @@ from PySide6.QtGui import (
     QFont,
     QFontDatabase,
     QFontMetricsF,
+    QKeyEvent,
     QPainter,
     QPaintEvent,
     QPen,
@@ -18,6 +19,7 @@ from PySide6.QtGui import (
 # Local imports
 from vim_key_trainer.domain.commands import CommandItem
 from vim_key_trainer.domain.keys import KeyToken
+from vim_key_trainer.ui.qt_input import NormalizedKey, normalize_key_event
 from vim_key_trainer.ui.widgets.practice_input import PracticeInput
 
 
@@ -94,6 +96,16 @@ class CommandInput(PracticeInput):
         self.token_index = 0
         self.display_count = 10
         self.completed_offset = 0
+
+    def normalize_event(self, event: QKeyEvent) -> NormalizedKey:
+        expected = (
+            self.items[self.command_index].tokens[self.token_index]
+            if self.command_index < len(self.items)
+            else None
+        )
+        return normalize_key_event(
+            event, allow_control_v=expected == KeyToken("chord", "ctrl+v")
+        )
 
     def event(self, event: QEvent) -> bool:
         if event.type() in {

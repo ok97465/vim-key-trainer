@@ -97,13 +97,17 @@ def press_token(page: CommandPracticePage, qtbot: QtBot, token: KeyToken) -> Non
         }[token.value]
         qtbot.keyClick(page.practice_input, key)
     else:
-        assert token.value == "ctrl+r"
+        assert token.value.startswith("ctrl+")
         modifier = (
             Qt.KeyboardModifier.MetaModifier
             if sys.platform == "darwin"
             else Qt.KeyboardModifier.ControlModifier
         )
-        qtbot.keyClick(page.practice_input, Qt.Key.Key_R, modifier)
+        qtbot.keyClick(
+            page.practice_input,
+            Qt.Key(ord(token.value.rsplit("+", 1)[1].upper())),
+            modifier,
+        )
 
 
 def test_inline_hint_tracks_target_and_requires_real_escape(

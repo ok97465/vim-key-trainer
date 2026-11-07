@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "content_version": 1,
+  "stage": "editing",
+  "id": "editing_delete_word",
+  "title": "단어와 뒤 공백 삭제",
+  "description": "remove와 뒤 공백만 삭제해 keep tail을 만듭니다.",
+  "initial": {
+    "lines": [
+      "keep remove tail"
+    ],
+    "row": 0,
+    "column": 0,
+    "mode": "normal"
+  },
+  "goal": {
+    "lines": [
+      "keep tail"
+    ]
+  },
+  "allowed_commands": [
+    "h",
+    "j",
+    "k",
+    "l",
+    "w",
+    "b",
+    "0",
+    "^",
+    "$",
+    "gg",
+    "G",
+    "dw",
+    "x",
+    "u",
+    "ctrl+r"
+  ],
+  "guide": [
+    {
+      "text": "w로 remove 시작으로 이동합니다.",
+      "keys": [
+        {
+          "kind": "char",
+          "value": "w"
+        }
+      ],
+      "expected": {
+        "lines": [
+          "keep remove tail"
+        ],
+        "row": 0,
+        "column": 5,
+        "mode": "normal"
+      }
+    },
+    {
+      "text": "dw로 단어와 다음 단어 앞 공백을 삭제합니다.",
+      "keys": [
+        {
+          "kind": "char",
+          "value": "d"
+        },
+        {
+          "kind": "char",
+          "value": "w"
+        }
+      ],
+      "expected": {
+        "lines": [
+          "keep tail"
+        ],
+        "row": 0,
+        "column": 5,
+        "mode": "normal"
+      }
+    }
+  ],
+  "baseline": {
+    "version": 1,
+    "keys": [
+      {
+        "kind": "char",
+        "value": "w"
+      },
+      {
+        "kind": "char",
+        "value": "d"
+      },
+      {
+        "kind": "char",
+        "value": "w"
+      }
+    ],
+    "key_count": 3
+  },
+  "free_enabled": true
+}

@@ -105,6 +105,41 @@ def test_keypad_detection_never_guesses_physical_positions() -> None:
     assert digit.token == ordinary.token == KeyToken(kind="char", value="1")
 
 
+@pytest.mark.parametrize(
+    ("platform", "physical_control", "other_modifier"),
+    [
+        (
+            "darwin",
+            Qt.KeyboardModifier.MetaModifier,
+            Qt.KeyboardModifier.ControlModifier,
+        ),
+        (
+            "linux",
+            Qt.KeyboardModifier.ControlModifier,
+            Qt.KeyboardModifier.MetaModifier,
+        ),
+    ],
+)
+def test_visual_block_control_v_is_opt_in_and_never_accepts_command_paste(
+    platform: str,
+    physical_control: Qt.KeyboardModifier,
+    other_modifier: Qt.KeyboardModifier,
+) -> None:
+    control_v = key_event(Qt.Key.Key_V, "\x16", physical_control)
+    assert normalize_key_event(control_v, platform=platform).reason == "paste"
+    assert normalize_key_event(
+        control_v, platform=platform, allow_control_v=True
+    ).token == KeyToken("chord", "ctrl+v")
+    assert (
+        normalize_key_event(
+            key_event(Qt.Key.Key_V, "v", other_modifier),
+            platform=platform,
+            allow_control_v=True,
+        ).reason
+        == "paste"
+    )
+
+
 def test_qt_key_click_emits_exactly_one_logical_key(qtbot: QtBot) -> None:
     class InputWidget(QWidget):
         def __init__(self) -> None:

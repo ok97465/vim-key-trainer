@@ -17,7 +17,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QWidget
 
 # Local imports
-from vim_key_trainer.ui.qt_input import normalize_key_event
+from vim_key_trainer.ui.qt_input import NormalizedKey, normalize_key_event
 
 
 class PracticeInput(QWidget):
@@ -61,8 +61,11 @@ class PracticeInput(QWidget):
         return super().event(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        self.key_received.emit(normalize_key_event(event))
+        self.key_received.emit(self.normalize_event(event))
         event.accept()
+
+    def normalize_event(self, event: QKeyEvent) -> NormalizedKey:
+        return normalize_key_event(event)
 
     def keyReleaseEvent(self, event: QKeyEvent) -> None:
         if not event.isAutoRepeat():

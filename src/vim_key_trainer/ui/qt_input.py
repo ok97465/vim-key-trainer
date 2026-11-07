@@ -25,6 +25,16 @@ class NormalizedKey:
     native_scan_code: int
 
 
+IGNORED_INPUT_MESSAGES = {
+    "auto_repeat": "길게 누르기의 자동 반복은 제외합니다.",
+    "paste": "붙여넣기 대신 한 키씩 입력하세요.",
+    "multiple_characters": "한 번에 여러 문자를 입력할 수 없습니다.",
+    "non_ascii": "영문 입력 모드로 전환해 주세요.",
+    "modifier": "Shift·Control 등은 단독으로 세지 않습니다.",
+    "unsupported_key": "이 키는 연습에서 사용하지 않습니다.",
+}
+
+
 _MODIFIER_KEYS = {
     Qt.Key.Key_Shift,
     Qt.Key.Key_Control,
@@ -57,7 +67,7 @@ _SPECIAL_KEYS: dict[int, str] = {
 
 
 def normalize_key_event(
-    event: QKeyEvent, *, platform: str = sys.platform
+    event: QKeyEvent, *, platform: str = sys.platform, allow_control_v: bool = False
 ) -> NormalizedKey:
     """Return one logical key, or a reason why the event is not scored.
 
@@ -111,10 +121,12 @@ def normalize_key_event(
         return normalized(reason="auto_repeat")
     if key in _MODIFIER_KEYS:
         return normalized(reason="modifier")
+    control_v = allow_control_v and key == Qt.Key.Key_V and flags == control_flag
     if (
         key == Qt.Key.Key_V
         and flags
         & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier)
+        and not control_v
     ) or (key == Qt.Key.Key_Insert and flags & Qt.KeyboardModifier.ShiftModifier):
         return normalized(reason="paste")
     if len(text) > 1:

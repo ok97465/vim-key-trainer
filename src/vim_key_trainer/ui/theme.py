@@ -60,4 +60,9 @@ QScrollBar::handle:vertical {
     background: #425268; border-radius: 4px; min-height: 30px;
 }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+QScrollBar:horizontal { background: #151c26; height: 9px; }
+QScrollBar::handle:horizontal {
+    background: #425268; border-radius: 4px; min-width: 30px;
+}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
 """

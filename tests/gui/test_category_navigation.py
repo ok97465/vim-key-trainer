@@ -9,11 +9,12 @@ from collections.abc import Iterator
 # Third party imports
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QPushButton, QWidget
+from PySide6.QtWidgets import QPushButton, QWidget
 from pytestqt.qtbot import QtBot
 
 # Local imports
 from vim_key_trainer.domain.command_generator import list_command_profiles
+from vim_key_trainer.domain.edit_generator import list_edit_profiles
 from vim_key_trainer.domain.exercises import EXERCISES
 from vim_key_trainer.domain.keys import KeyToken
 from vim_key_trainer.domain.sessions import SessionState
@@ -68,7 +69,9 @@ def press_token(window: MainWindow, qtbot: QtBot, token: KeyToken) -> None:
             if sys.platform == "darwin"
             else Qt.KeyboardModifier.ControlModifier
         )
-        qtbot.keyClick(target, Qt.Key.Key_R, modifier)
+        qtbot.keyClick(
+            target, Qt.Key(ord(token.value.rsplit("+", 1)[1].upper())), modifier
+        )
 
 
 def test_sidebar_separates_numeric_and_command_catalogs(
@@ -116,7 +119,7 @@ def test_new_numeric_choices_follow_settings_and_return_to_numeric_menu(
     assert "완료 0회" in window.commands_summary.text()
 
 
-def test_sidebar_switch_aborts_active_attempts_and_opens_editing_placeholder(
+def test_sidebar_switch_aborts_active_attempts_and_opens_editing_catalog(
     window: MainWindow, qtbot: QtBot
 ) -> None:
     click_named(window.numbers_page, qtbot, "lesson_numbers")
@@ -137,10 +140,10 @@ def test_sidebar_switch_aborts_active_attempts_and_opens_editing_placeholder(
     assert window.stack.currentWidget() is window.editing_page
     assert window.editing_button.isChecked()
     assert not window.commands_button.isChecked()
-    assert not lesson_ids(window.editing_page)
-    assert any(
-        "준비" in label.text() for label in window.editing_page.findChildren(QLabel)
-    )
+    assert lesson_ids(window.editing_page) == {
+        profile.id for profile in list_edit_profiles()
+    }
+    assert window.editing_page.launch_button.isVisible()
     assert window.repository.completed_count == 0
     assert window.repository.best_stars("numbers") == 0
     click_named(window.editing_page, qtbot, "editingToCommands")

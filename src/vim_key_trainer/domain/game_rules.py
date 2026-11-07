@@ -21,3 +21,21 @@ def typing_stars(
     if correct * 100 >= (correct + incorrect) * 95:
         return 2
     return 1
+
+
+def editing_stars(
+    *,
+    completed: bool,
+    key_count: int,
+    baseline_keys: int,
+    extra_hints: int = 0,
+    step_returns: int = 0,
+) -> int:
+    """자유 풀이에는 타이핑 정확도 대신 검증한 기준 입력 수를 사용한다."""
+    if not completed:
+        return 0
+    if key_count > baseline_keys:
+        return 1
+    if extra_hints or step_returns:
+        return 2
+    return 3

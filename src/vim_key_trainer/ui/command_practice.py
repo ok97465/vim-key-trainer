@@ -27,9 +27,9 @@ from vim_key_trainer.services.command_session import (
     CommandSession,
     ContinuousCommandSession,
 )
-from vim_key_trainer.services.result_repository import MemoryResultRepository
+from vim_key_trainer.services.result_repository import ResultRepository
 from vim_key_trainer.ui.components import button, label, scroll_page
-from vim_key_trainer.ui.qt_input import NormalizedKey
+from vim_key_trainer.ui.qt_input import IGNORED_INPUT_MESSAGES, NormalizedKey
 from vim_key_trainer.ui.widgets.command_input import CommandInput
 
 
@@ -40,7 +40,7 @@ def _number(value: float | None, suffix: str = "") -> str:
 class CommandPracticePage(QWidget):
     leave_requested = Signal()
 
-    def __init__(self, repository: MemoryResultRepository) -> None:
+    def __init__(self, repository: ResultRepository) -> None:
         super().__init__()
         self.repository = repository
         self.session: CommandSession | None = None
@@ -94,7 +94,9 @@ class CommandPracticePage(QWidget):
         self.feedback = label("", "muted", wrap=True)
         self.feedback.setMinimumHeight(22)
         actions = QHBoxLayout()
-        self.start_button = button("연습 시작", "startCommands", primary=True)
+        self.start_button = button(
+            "연습 시작", "startCommands", primary=True, enter_activates=True
+        )
         self.start_button.clicked.connect(self.start_practice)
         actions.addWidget(self.start_button)
         self.pause_button = button("일시정지", "pauseCommands")
@@ -138,14 +140,16 @@ class CommandPracticePage(QWidget):
         self.result_summary = label("", wrap=True)
         result_layout.addWidget(self.result_summary)
         result_actions = QHBoxLayout()
+        self.new_button = button(
+            "다른 문제", "newCommands", primary=True, enter_activates=True
+        )
+        self.new_button.clicked.connect(self.new_problem)
+        result_actions.addWidget(self.new_button)
         self.result_retry_button = button(
-            "같은 문제 재도전", "retryCommandResult", primary=True
+            "같은 문제 재도전", "retryCommandResult", enter_activates=True
         )
         self.result_retry_button.clicked.connect(self.retry)
         result_actions.addWidget(self.result_retry_button)
-        self.new_button = button("새 문제로 연습", "newCommands")
-        self.new_button.clicked.connect(self.new_problem)
-        result_actions.addWidget(self.new_button)
         home = button("Vim 명령 선택", "commandResultHome")
         home.clicked.connect(self.leave_requested.emit)
         result_actions.addWidget(home)
@@ -161,7 +165,7 @@ class CommandPracticePage(QWidget):
                 "별: 연습 완료 ★ · 정확도 95% 이상 ★★ · 100% ★★★\n"
                 "같은 생성 규칙·seed·완료 명령 수·입력 조건에서 "
                 "정확도, 활성 시간 순으로 개인 기록을 비교합니다.\n"
-                "기록은 이번 실행 동안만 유지됩니다.",
+                "학습 기록과 개인 기록은 로컬 DB에 저장합니다.",
                 "muted",
                 wrap=True,
             )
@@ -240,17 +244,9 @@ class CommandPracticePage(QWidget):
                 "같은 위치에서 다시 입력하세요."
             )
         else:
-            reasons = {
-                "auto_repeat": "길게 누르기의 자동 반복은 제외합니다.",
-                "paste": "붙여넣기 대신 한 키씩 입력하세요.",
-                "multiple_characters": "한 번에 여러 문자를 입력할 수 없습니다.",
-                "non_ascii": "영문 입력 모드로 전환해 주세요.",
-                "modifier": "Shift·Control 등은 단독으로 세지 않습니다.",
-                "unsupported_key": "이 키는 연습에서 사용하지 않습니다.",
-            }
             self.feedback.setText(
                 "입력 제외 · "
-                + reasons.get(
+                + IGNORED_INPUT_MESSAGES.get(
                     normalized.reason or "", "Backspace는 목표일 때만 입력합니다."
                 )
             )
@@ -362,6 +358,13 @@ class CommandPracticePage(QWidget):
         self.timer.stop()
         if self.session is not None:
             self.session.abort()
+            result = self.session.result
+            if (
+                result is not None
+                and result.state == SessionState.ABORTED
+                and result.correct + result.incorrect
+            ):
+                self.repository.save(result)
 
     def finish_practice(self) -> None:
         session = self.session
@@ -447,6 +450,7 @@ class CommandPracticePage(QWidget):
         self._switching = True
         try:
             self.stack.setCurrentWidget(self.result_page)
+            self.new_button.setFocus()
         finally:
             self._switching = False
 

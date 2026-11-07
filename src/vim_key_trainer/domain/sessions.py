@@ -7,6 +7,8 @@ from enum import StrEnum
 
 # Local imports
 from vim_key_trainer.domain.commands import CommandSpec
+from vim_key_trainer.domain.document_missions import DocumentPracticeSpec
+from vim_key_trainer.domain.editing import EditMode, EditPracticeSpec
 from vim_key_trainer.domain.exercises import PracticeSpec
 from vim_key_trainer.domain.game_rules import GAME_RULES_VERSION
 from vim_key_trainer.domain.keys import KeyToken
@@ -83,4 +85,35 @@ class CommandSessionResult:
     command_samples: tuple[CommandTiming, ...] = ()
 
 
-StoredResult = SessionResult | CommandSessionResult
+@dataclass(frozen=True, slots=True)
+class EditingSessionResult:
+    attempt_id: str
+    lesson_id: str
+    content_version: int
+    lesson_signature: str
+    baseline_version: int
+    mode: EditMode
+    state: SessionState
+    key_count: int
+    baseline_keys: int
+    elapsed_seconds: float
+    correct: int | None
+    incorrect: int | None
+    accuracy: float | None
+    max_combo: int | None
+    stars: int
+    extra_hints: int
+    step_returns: int
+    pause_count: int
+    guide_level: str
+    game_rules_version: int = GAME_RULES_VERSION
+    practice_spec: EditPracticeSpec | None = None
+    generator_version: int = 0
+    document_spec: DocumentPracticeSpec | None = None
+
+    @property
+    def delta(self) -> int:
+        return self.key_count - self.baseline_keys
+
+
+StoredResult = SessionResult | CommandSessionResult | EditingSessionResult

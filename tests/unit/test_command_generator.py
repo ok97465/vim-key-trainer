@@ -50,7 +50,8 @@ def test_mixed_profile_covers_requested_commands_and_thousands_of_combinations()
     None
 ):
     generator = CommandGenerator(COMMAND_PROFILES[0], seed=23)
-    items = [generator.next_item() for _ in range(10_000)]
+    # 검색·도구 가족 추가 후에도 희소한 count 없는 dW까지 반복 생성되는지 본다.
+    items = [generator.next_item() for _ in range(20_000)]
     displays = Counter(item.display for item in items)
     assert len(displays) > 2_000
     assert all(displays[command] >= 2 for command in ("ciw", "cw", "dW", "zz"))
@@ -61,6 +62,34 @@ def test_mixed_profile_covers_requested_commands_and_thousands_of_combinations()
         first.tokens != second.tokens
         for first, second in zip(items, items[1:], strict=False)
     )
+
+
+@pytest.mark.parametrize(
+    ("profile_id", "expected"),
+    (
+        ("commands_movement_random", {"W", "B", "e", "E"}),
+        ("commands_operators_random", {"dW", "de", "dE"}),
+        ("commands_objects_random", {"diw", "diW"}),
+    ),
+)
+def test_typing_profiles_cover_the_extended_editing_word_commands(
+    profile_id: str, expected: set[str]
+) -> None:
+    generator = CommandGenerator(get_command_profile(profile_id), seed=47)
+    found = {}
+    for _ in range(3_000):
+        item = generator.next_item()
+        if item.display in expected:
+            found[item.display] = item
+        if set(found) == expected:
+            break
+    assert set(found) == expected
+    for display, item in found.items():
+        assert item.execution_support == "typing_only"
+        assert ("WORD" in item.meaning) == (display[-1].isupper())
+        if display in {"diw", "diW"}:
+            assert "현재" in item.brief_meaning
+            assert "사이 공백도" in item.meaning
 
 
 @pytest.mark.parametrize("profile", COMMAND_PROFILES, ids=lambda profile: profile.id)
@@ -315,13 +344,13 @@ def test_incomplete_context_summary_does_not_claim_the_operation_is_finished() -
     (
         (
             "commands_random",
-            1,
-            "0b94218bbaca1b61386c13bb0713bb296eb73ed1f2727cd81c0db3d209dadc38",
+            2,
+            "c1f2f3dce7f7435a5a9e0a73141c4eedfa7629c3a4f4172a17f8e6ab8d6f3073",
         ),
         (
             "commands_movement_random",
-            1,
-            "ed987d4b116f5d65b7f4f996a308e4f112480ad0f2188b4a260b3808d2eb514a",
+            2,
+            "bec6c8b1e4001201fb78e43b528d78c1a3d47dbe12f4924bac3ed569a42f70dd",
         ),
         (
             "commands_operators_random",
@@ -340,8 +369,8 @@ def test_incomplete_context_summary_does_not_claim_the_operation_is_finished() -
         ),
         (
             "commands_context_random",
-            1,
-            "7e5d39a73951d44b1014fd2818de3d0fca43ec5521b8cc7abe27dce9e14ae490",
+            2,
+            "580f5f65e25118606805db2ce1c36a950154db5bc2c64650cdb24c2118d70b11",
         ),
     ),
 )
@@ -425,3 +454,52 @@ def test_legacy_item_uses_first_sentence_and_rejects_blank_short_meaning() -> No
     )
     with pytest.raises(ValueError):
         replace(item, short_meaning="   ")
+
+
+def test_search_generation_uses_real_enter_and_explains_required_history() -> None:
+    generator = CommandGenerator(profile_for("search"), seed=61)
+    commands = set()
+    patterns = set()
+    for _ in range(300):
+        item = generator.next_item()
+        first = item.tokens[0].value
+        command = next(
+            token.value for token in item.tokens if not token.value.isdigit()
+        )
+        commands.add(command)
+        if first in {"/", "?"}:
+            assert item.tokens[-1] == KeyToken("special", "enter")
+            assert all(token.kind == "char" for token in item.tokens[:-1])
+            patterns.add(tuple(item.tokens[1:-1]))
+        else:
+            assert all(token.kind == "char" for token in item.tokens)
+            if command in {"n", "N"}:
+                assert "이전에 확정한 검색어" in item.follow_up
+    assert commands == {"/", "?", "n", "N", "*", "#"}
+    assert len(patterns) >= 20
+
+
+def test_normal_tool_generation_covers_new_editing_and_physical_control_keys() -> None:
+    generator = CommandGenerator(profile_for("normal_tools"), seed=22)
+    items = [generator.next_item() for _ in range(500)]
+    chords = {
+        token.value for item in items for token in item.tokens if token.kind == "chord"
+    }
+    assert chords == {
+        "ctrl+a",
+        "ctrl+x",
+        "ctrl+u",
+        "ctrl+d",
+        "ctrl+f",
+        "ctrl+b",
+        "ctrl+e",
+        "ctrl+y",
+        "ctrl+o",
+        "ctrl+i",
+    }
+    displays = {item.display for item in items}
+    assert {">>", "<<", "J", "~", "."} <= displays
+    assert any(item.display.startswith("v") for item in items)
+    assert any(item.display.startswith("R") for item in items)
+    assert any(item.display.startswith("m") for item in items)
+    assert all(item.execution_support == "typing_only" for item in items)

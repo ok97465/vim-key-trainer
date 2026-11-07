@@ -1,56 +1,60 @@
-"""현재 실행 중에만 기록을 유지하는 메모리 저장소."""
+"""저장소 공통 계약과 Qt에 독립적인 기록 비교·메모리 캐시."""
+
+# Standard library imports
+from typing import Protocol
 
 # Local imports
+from vim_key_trainer.domain.editing import EditMode
 from vim_key_trainer.domain.game_rules import GAME_RULES_VERSION
 from vim_key_trainer.domain.sessions import (
     CommandSessionResult,
+    EditingSessionResult,
     SessionState,
     StoredResult,
 )
-
-ComparisonKey = tuple[object, ...]
-
-
-def _comparison_key(result: StoredResult) -> ComparisonKey:
-    if isinstance(result, CommandSessionResult):
-        return (
-            "commands",
-            result.spec.lesson_id,
-            result.spec.seed,
-            result.lesson_version,
-            result.lesson_signature,
-            result.item_ids,
-            result.display_count,
-            result.target,
-            result.generator_version,
-            result.completed_commands,
-            result.transcript_digest,
-            result.pause_count > 0,
-            result.game_rules_version,
-        )
-    spec = result.spec
-    return (
-        "symbols",
-        spec.exercise_id,
-        spec.seed,
-        spec.target_length,
-        spec.display_width,
-        result.target,
-        result.pause_count > 0,
-        result.game_rules_version,
-    )
+from vim_key_trainer.services.result_codec import decode_result, encode_result
+from vim_key_trainer.services.result_comparison import (
+    ComparisonKey,
+    comparison_key,
+    is_better_result,
+)
 
 
-def _is_better(candidate: StoredResult, previous: StoredResult) -> bool:
-    # 완료 시도끼리 비교하므로 correct는 양수다. 반올림 전 정수 비율로 비교한다.
-    candidate_ratio = candidate.correct * (previous.correct + previous.incorrect)
-    previous_ratio = previous.correct * (candidate.correct + candidate.incorrect)
-    if candidate_ratio != previous_ratio:
-        return candidate_ratio > previous_ratio
-    return candidate.elapsed_seconds > 0 and (
-        previous.elapsed_seconds <= 0
-        or candidate.elapsed_seconds < previous.elapsed_seconds
-    )
+class ResultRepository(Protocol):
+    @property
+    def results(self) -> tuple[StoredResult, ...]: ...
+
+    @property
+    def completed_count(self) -> int: ...
+
+    @property
+    def persistence_error(self) -> str | None: ...
+
+    def save(self, result: StoredResult) -> bool: ...
+
+    def retry_pending(self) -> int: ...
+
+    def best_for(self, result: StoredResult) -> StoredResult | None: ...
+
+    def best_stars(
+        self, exercise_id: str, game_rules_version: int = GAME_RULES_VERSION
+    ) -> int: ...
+
+    def best_command_stars(
+        self,
+        lesson_id: str,
+        content_version: int,
+        game_rules_version: int = GAME_RULES_VERSION,
+    ) -> int: ...
+
+    def best_edit_stars(
+        self,
+        lesson_id: str,
+        content_version: int,
+        mode: EditMode,
+        guide_level: str | None = None,
+        game_rules_version: int = GAME_RULES_VERSION,
+    ) -> int: ...
 
 
 class MemoryResultRepository:
@@ -59,6 +63,15 @@ class MemoryResultRepository:
         self._bests: dict[ComparisonKey, StoredResult] = {}
         self._stars: dict[tuple[str, int], int] = {}
         self._command_stars: dict[tuple[str, int, int], int] = {}
+        self._edit_stars: dict[tuple[str, int, EditMode, str, int], int] = {}
+        self._completed_count = 0
+
+    @property
+    def persistence_error(self) -> str | None:
+        return None
+
+    def retry_pending(self) -> int:
+        return 0
 
     @property
     def results(self) -> tuple[StoredResult, ...]:
@@ -66,9 +79,7 @@ class MemoryResultRepository:
 
     @property
     def completed_count(self) -> int:
-        return sum(
-            result.state == SessionState.COMPLETED for result in self._results.values()
-        )
+        return self._completed_count
 
     def best_stars(
         self, exercise_id: str, game_rules_version: int = GAME_RULES_VERSION
@@ -86,15 +97,45 @@ class MemoryResultRepository:
         )
 
     def best_for(self, result: StoredResult) -> StoredResult | None:
-        return self._bests.get(_comparison_key(result))
+        return self._bests.get(comparison_key(result))
+
+    def best_edit_stars(
+        self,
+        lesson_id: str,
+        content_version: int,
+        mode: EditMode,
+        guide_level: str | None = None,
+        game_rules_version: int = GAME_RULES_VERSION,
+    ) -> int:
+        level = guide_level or ("step" if mode == "guided" else "none")
+        return self._edit_stars.get(
+            (lesson_id, content_version, mode, level, game_rules_version), 0
+        )
 
     def save(self, result: StoredResult) -> bool:
         if result.attempt_id in self._results:
             return False
+        result = decode_result(encode_result(result))
+        return self._record_result(result)
+
+    def _record_result(self, result: StoredResult) -> bool:
+        """검증한 결과를 한 번만 메모리 진행도와 개인 기록에 반영한다."""
         self._results[result.attempt_id] = result
         if result.state != SessionState.COMPLETED:
             return False
-        if isinstance(result, CommandSessionResult):
+        self._completed_count += 1
+        if isinstance(result, EditingSessionResult):
+            edit_star_key = (
+                result.lesson_id,
+                result.content_version,
+                result.mode,
+                result.guide_level,
+                result.game_rules_version,
+            )
+            self._edit_stars[edit_star_key] = max(
+                self.best_edit_stars(*edit_star_key), result.stars
+            )
+        elif isinstance(result, CommandSessionResult):
             star_key = (
                 result.spec.lesson_id,
                 result.lesson_version,
@@ -108,9 +149,9 @@ class MemoryResultRepository:
             self._stars[symbol_star_key] = max(
                 self.best_stars(*symbol_star_key), result.stars
             )
-        key = _comparison_key(result)
+        key = comparison_key(result)
         previous = self._bests.get(key)
-        if previous is None or _is_better(result, previous):
+        if previous is None or is_better_result(result, previous):
             self._bests[key] = result
             return True
         return False

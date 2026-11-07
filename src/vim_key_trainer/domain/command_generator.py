@@ -15,7 +15,7 @@ from typing import Literal
 from vim_key_trainer.domain.commands import CommandItem
 from vim_key_trainer.domain.keys import KeyToken
 
-GENERATOR_VERSION = 2
+GENERATOR_VERSION = 3
 MAX_COUNT = 99
 MAX_COMBINED_COUNT = 999
 CommandFamily = Literal[
@@ -30,6 +30,8 @@ CommandFamily = Literal[
     "context",
     "sequence",
     "simple_edit",
+    "search",
+    "normal_tools",
 ]
 CountPolicy = Literal["repeat", "line", "end_line", "none"]
 _MAX_GENERATION_ATTEMPTS = 24
@@ -71,21 +73,25 @@ _ALL_FAMILIES: tuple[CommandFamily, ...] = (
     "context",
     "sequence",
     "simple_edit",
+    "search",
+    "normal_tools",
 )
 COMMAND_PROFILES = (
     CommandProfile(
         "commands_random",
         "명령 조합 · 전체",
-        "이동·연산자·텍스트 객체·입력을 고르게 계속 생성합니다.",
+        "이동·검색·연산자·텍스트 객체·입력과 복합 편집을 계속 생성합니다.",
         _ALL_FAMILIES,
+        content_version=2,
         example="3j  ciw  dW  zz",
     ),
     CommandProfile(
         "commands_movement_random",
         "이동·화면 이동",
-        "횟수·단어 이동·문자 찾기·zz 등을 조합합니다.",
-        ("movement", "screen", "find"),
-        example="3j  22gg  f,  zz",
+        "횟수·word/WORD 이동·문자 찾기·검색·화면 위치를 조합합니다.",
+        ("movement", "screen", "find", "search"),
+        content_version=2,
+        example="W  B  2E  22gg  f,  zz",
     ),
     CommandProfile(
         "commands_operators_random",
@@ -97,14 +103,14 @@ COMMAND_PROFILES = (
             "simple_edit",
         ),
         content_version=2,
-        example="cw  dW  2dd  yy",
+        example="dw  dW  de  dE  2dd  yy",
     ),
     CommandProfile(
         "commands_objects_random",
         "텍스트 객체",
-        "단어·따옴표·괄호 범위를 지정하는 명령을 집중 연습합니다.",
+        "diw·diW로 word/WORD 안쪽을 고르고 따옴표·괄호 범위도 연습합니다.",
         ("operator_object",),
-        example='ciw  daw  di(  yi"',
+        example='diw  diW  ciw  daw  di(  yi"',
     ),
     CommandProfile(
         "commands_insert_random",
@@ -117,8 +123,9 @@ COMMAND_PROFILES = (
     CommandProfile(
         "commands_context_random",
         "이력·레지스터·복합 명령",
-        "undo·redo, 매크로·레지스터 조각과 여러 명령의 연결을 연습합니다.",
-        ("history", "context", "sequence"),
+        "undo·redo, 레지스터·검색 이력·줄 편집과 여러 명령의 연결을 연습합니다.",
+        ("history", "context", "sequence", "normal_tools"),
+        content_version=2,
         example='u<C-r>  qa  "+y  jdiw',
     ),
 )
@@ -394,6 +401,8 @@ class CommandGenerator:
             "context": self._context,
             "sequence": self._sequence,
             "simple_edit": self._simple_edit,
+            "search": self._search,
+            "normal_tools": self._normal_tools,
         }
         return builders[family]()
 
@@ -594,7 +603,7 @@ class CommandGenerator:
         if command in {"p", "P"}:
             follow_up = (
                 "실제 Vim에서는 레지스터 내용이 필요합니다. "
-                "이 앱은 내용을 읽거나 붙이지 않습니다."
+                "이 앱의 명령 타이핑 연습은 내용을 읽거나 붙이지 않습니다."
             )
         return _item(_characters(text), meaning, follow_up, short_meaning=brief)
 
@@ -661,6 +670,106 @@ class CommandGenerator:
             short_meaning=brief,
         )
 
+    def _search(self) -> CommandItem:
+        command = self._random.choice(("/", "?", "n", "N", "*", "#"))
+        count = self._count()
+        if command in {"/", "?"}:
+            pattern = self._random.choice(("cache", "ready", "value", "worker"))
+            pattern += (
+                str(self._random.randrange(10)) if self._random.random() < 0.4 else ""
+            )
+            direction = "앞" if command == "/" else "뒤"
+            return _item(
+                _characters(command + pattern) + (_ENTER,),
+                f"{command}로 {pattern!r}을 {direction}으로 검색하고 "
+                "실제 Enter로 확정합니다.",
+                "검색어가 있는 문맥을 가정합니다. 문서 끝에서는 처음으로 순환합니다.",
+                short_meaning=f"{pattern!r} {direction}으로 검색 → Enter",
+            )
+        if command in {"*", "#"}:
+            direction = "앞" if command == "*" else "뒤"
+            meaning = (
+                f"현재 word와 같은 단어의 {count}번째 위치를 {direction}으로 찾습니다."
+            )
+            note = "커서 아래에 ASCII word가 있는 독립된 문맥입니다."
+            brief = f"현재 단어 {direction}으로 검색 · {count}회"
+        else:
+            direction = "같은 방향" if command == "n" else "반대 방향"
+            meaning = f"마지막 검색을 {direction}으로 {count}회 반복합니다."
+            note = "이전에 확정한 검색어와 방향이 있는 독립된 문맥입니다."
+            brief = f"검색 {direction}으로 반복 · {count}회"
+        return _item(
+            _characters(_prefix(count) + command), meaning, note, short_meaning=brief
+        )
+
+    def _normal_tools(self) -> CommandItem:
+        variant = self._random.randrange(10)
+        count = self._count()
+        prefix = _prefix(count)
+        note = _COMPLETE
+        if variant == 0:
+            chord = self._random.choice(("ctrl+a", "ctrl+x"))
+            action = "증가" if chord == "ctrl+a" else "감소"
+            tokens = _characters(prefix) + (KeyToken("chord", chord),)
+            brief = f"숫자 {count}만큼 {action}"
+            note = "커서 위치나 같은 줄 오른쪽에 수정할 10진수가 있어야 합니다."
+        elif variant == 1:
+            command = self._random.choice((">>", "<<"))
+            tokens = _characters(prefix + command)
+            brief = f"현재부터 {count}줄 " + (
+                "들여쓰기" if command == ">>" else "내어쓰기"
+            )
+        elif variant == 2:
+            tokens = _characters(prefix + "J")
+            brief = f"{max(2, count)}줄을 공백을 정리하며 합치기"
+        elif variant == 3:
+            tokens = _characters(prefix + "~")
+            brief = f"{count}문자 대소문자 전환"
+        elif variant == 4:
+            tokens = _characters(prefix + ".")
+            brief = "마지막 변경 반복" + (f" · 횟수 {count}" if count > 1 else "")
+            note = "앞서 반복 가능한 문서 변경이 있는 독립된 문맥입니다."
+        elif variant == 5:
+            chord, brief = self._random.choice(
+                (
+                    ("ctrl+u", "반 화면 위로 이동"),
+                    ("ctrl+d", "반 화면 아래로 이동"),
+                    ("ctrl+f", "다음 페이지로 이동"),
+                    ("ctrl+b", "이전 페이지로 이동"),
+                    ("ctrl+e", "보기를 한 줄 아래로 스크롤"),
+                    ("ctrl+y", "보기를 한 줄 위로 스크롤"),
+                )
+            )
+            tokens = (KeyToken("chord", chord),)
+        elif variant == 6:
+            action, verb = self._random.choice(
+                (("d", "삭제"), ("y", "복사"), ("~", "대소문자 전환"))
+            )
+            tokens = _characters("v" + prefix + "l" + action)
+            brief = f"Visual로 오른쪽 {count}칸 선택 후 {verb}"
+            note = "선택 범위가 같은 줄 안에 있는 독립된 문맥입니다."
+        elif variant == 7:
+            tokens = _characters("R" + self._text()) + (_ESC,)
+            brief = "Replace 모드에서 덮어쓰기 → Esc"
+        elif variant == 8:
+            name = self._random.choice("abcxyz")
+            command = self._random.choice(("m", "'", "`"))
+            tokens = _characters(command + name)
+            brief = f"{name} 마크 " + ("설정" if command == "m" else "위치로 이동")
+            if command != "m":
+                note = (
+                    "해당 마크가 설정된 독립된 문맥입니다. "
+                    "'는 첫 비공백, `는 정확한 열로 이동합니다."
+                )
+        else:
+            chord = self._random.choice(("ctrl+o", "ctrl+i"))
+            tokens = (KeyToken("chord", chord),)
+            brief = "점프 이력 " + (
+                "이전 위치로" if chord == "ctrl+o" else "다음 위치로"
+            )
+            note = "이전에 문서 안에서 점프한 이력이 있는 독립된 문맥입니다."
+        return _item(tokens, brief + "합니다.", note, short_meaning=brief)
+
     def _context(self) -> CommandItem:
         if self._random.random() < 0.5:
             register = self._random.choice("abcdefghijklmnopqrstuvwxyz")
@@ -680,7 +789,8 @@ class CommandGenerator:
             f"{register} 레지스터를 지정하고 yank 연산을 시작합니다.",
             "선택 영역이 없는 Normal 문맥입니다. "
             "motion·text object 또는 y가 더 필요합니다. "
-            "앱은 레지스터·OS 클립보드에 접근하지 않습니다." + clipboard_note,
+            "이 앱의 명령 타이핑 연습은 레지스터·OS 클립보드에 접근하지 않습니다."
+            + clipboard_note,
             short_meaning=(
                 ("클립보드" if register == "+" else f"{register} 레지스터")
                 + " 복사 시작 · 범위 입력 필요"

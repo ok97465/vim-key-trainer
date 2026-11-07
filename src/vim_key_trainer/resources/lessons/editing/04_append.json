@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "content_version": 1,
+  "stage": "editing",
+  "id": "editing_append",
+  "title": "줄 끝에 주석 추가",
+  "description": "A로 줄 끝에 들어가 공백을 포함한 주석을 추가합니다.",
+  "initial": {
+    "lines": [
+      "print('hello')"
+    ],
+    "row": 0,
+    "column": 0,
+    "mode": "normal"
+  },
+  "goal": {
+    "lines": [
+      "print('hello') # ready"
+    ]
+  },
+  "allowed_commands": [
+    "h",
+    "j",
+    "k",
+    "l",
+    "w",
+    "b",
+    "0",
+    "^",
+    "$",
+    "gg",
+    "G",
+    "i",
+    "a",
+    "I",
+    "A",
+    "x",
+    "u",
+    "ctrl+r"
+  ],
+  "guide": [
+    {
+      "text": "A로 줄 끝에 주석을 입력하고 실제 Esc로 마칩니다.",
+      "keys": [
+        {
+          "kind": "char",
+          "value": "A"
+        },
+        {
+          "kind": "char",
+          "value": " "
+        },
+        {
+          "kind": "char",
+          "value": "#"
+        },
+        {
+          "kind": "char",
+          "value": " "
+        },
+        {
+          "kind": "char",
+          "value": "r"
+        },
+        {
+          "kind": "char",
+          "value": "e"
+        },
+        {
+          "kind": "char",
+          "value": "a"
+        },
+        {
+          "kind": "char",
+          "value": "d"
+        },
+        {
+          "kind": "char",
+          "value": "y"
+        },
+        {
+          "kind": "special",
+          "value": "esc"
+        }
+      ],
+      "expected": {
+        "lines": [
+          "print('hello') # ready"
+        ],
+        "row": 0,
+        "column": 21,
+        "mode": "normal"
+      }
+    }
+  ],
+  "baseline": {
+    "version": 1,
+    "keys": [
+      {
+        "kind": "char",
+        "value": "A"
+      },
+      {
+        "kind": "char",
+        "value": " "
+      },
+      {
+        "kind": "char",
+        "value": "#"
+      },
+      {
+        "kind": "char",
+        "value": " "
+      },
+      {
+        "kind": "char",
+        "value": "r"
+      },
+      {
+        "kind": "char",
+        "value": "e"
+      },
+      {
+        "kind": "char",
+        "value": "a"
+      },
+      {
+        "kind": "char",
+        "value": "d"
+      },
+      {
+        "kind": "char",
+        "value": "y"
+      },
+      {
+        "kind": "special",
+        "value": "esc"
+      }
+    ],
+    "key_count": 10
+  },
+  "free_enabled": true
+}

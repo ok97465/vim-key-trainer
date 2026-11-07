@@ -1,0 +1,158 @@
+"""편집 과제의 불변 콘텐츠와 목표 판정. Qt에 의존하지 않는다."""
+
+# Standard library imports
+import hashlib
+import json
+import re
+from dataclasses import dataclass
+from typing import Literal
+
+# Local imports
+from vim_key_trainer.domain.document_missions import DocumentPracticeSpec
+from vim_key_trainer.domain.edit_weights import EditTechniqueWeights
+from vim_key_trainer.domain.keys import KeyToken
+from vim_key_trainer.engine import EditorState
+
+EditMode = Literal["guided", "free"]
+EDIT_DOCUMENT_LENGTHS = (12, 24, 40)
+
+
+@dataclass(frozen=True, slots=True)
+class EditPracticeSpec:
+    """유형·길이·seed를 고정하면 같은 편집 문제를 다시 만들 수 있다."""
+
+    profile_id: str
+    seed: int
+    document_lines: int = 24
+    technique_weights: EditTechniqueWeights | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.profile_id) is not str
+            or re.fullmatch(r"[a-z][a-z0-9_]*", self.profile_id) is None
+        ):
+            raise ValueError("편집 유형 ID의 형식이 올바르지 않습니다.")
+        if type(self.seed) is not int or not 0 <= self.seed <= 2**32 - 1:
+            raise ValueError("seed는 0 이상 2**32 - 1 이하의 정수여야 합니다.")
+        if (
+            type(self.document_lines) is not int
+            or self.document_lines not in EDIT_DOCUMENT_LENGTHS
+        ):
+            raise ValueError("편집 문서 길이는 12·24·40줄 중 하나여야 합니다.")
+        if self.technique_weights is not None and not isinstance(
+            self.technique_weights, EditTechniqueWeights
+        ):
+            raise ValueError("편집 기술 비중의 형식이 올바르지 않습니다.")
+
+
+@dataclass(frozen=True, slots=True)
+class GuideStep:
+    keys: tuple[KeyToken, ...]
+    expected: EditorState
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class EditLesson:
+    schema_version: int
+    content_version: int
+    id: str
+    title: str
+    description: str
+    initial: EditorState
+    goal_lines: tuple[str, ...]
+    goal_cursor: tuple[int, int] | None
+    allowed_commands: frozenset[str]
+    guide: tuple[GuideStep, ...]
+    baseline_version: int
+    baseline: tuple[KeyToken, ...]
+    baseline_keys: int
+    free_enabled: bool = True
+    practice_spec: EditPracticeSpec | None = None
+    generator_version: int = 0
+    document_spec: DocumentPracticeSpec | None = None
+
+    @property
+    def signature(self) -> str:
+        """동일한 시작·목표·허용 범위·가이드·기준 풀이끼리만 비교한다."""
+
+        def state_data(state: EditorState) -> tuple[object, ...]:
+            return (
+                state.lines,
+                state.row,
+                state.column,
+                state.mode,
+                state.preferred_column,
+                state.pending,
+            )
+
+        data: tuple[object, ...] = (
+            self.schema_version,
+            self.content_version,
+            state_data(self.initial),
+            self.goal_lines,
+            self.goal_cursor,
+            sorted(self.allowed_commands),
+            tuple(
+                (
+                    tuple((key.kind, key.value) for key in step.keys),
+                    state_data(step.expected),
+                )
+                for step in self.guide
+            ),
+            self.baseline_version,
+            tuple((key.kind, key.value) for key in self.baseline),
+            self.baseline_keys,
+            self.free_enabled,
+        )
+        if self.practice_spec is not None or self.generator_version:
+            spec = self.practice_spec
+            generation = (
+                (spec.profile_id, spec.seed, spec.document_lines)
+                if spec is not None
+                else None
+            )
+            data += (generation, self.generator_version)
+        if self.document_spec is not None:
+            document = self.document_spec
+            data += (
+                ("document", document.mission_id, document.seed, document.change_count),
+            )
+        for specification in (self.practice_spec, self.document_spec):
+            if (
+                specification is not None
+                and specification.technique_weights is not None
+            ):
+                data += (
+                    ("technique_weights", specification.technique_weights.items()),
+                )
+        return hashlib.sha256(
+            json.dumps(data, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+
+
+def expected_states_match(expected: EditorState, actual: EditorState) -> bool:
+    """문서·커서·모드·대기와 명시된 선호 열을 검사한다."""
+    return (
+        expected.lines == actual.lines
+        and expected.row == actual.row
+        and expected.column == actual.column
+        and expected.mode == actual.mode
+        and expected.pending == actual.pending
+        and (
+            expected.preferred_column is None
+            or expected.preferred_column == actual.preferred_column
+        )
+    )
+
+
+def goal_matches(lesson: EditLesson, state: EditorState) -> bool:
+    return (
+        state.lines == lesson.goal_lines
+        and state.mode == "normal"
+        and not state.pending
+        and (
+            lesson.goal_cursor is None
+            or lesson.goal_cursor == (state.row, state.column)
+        )
+    )
