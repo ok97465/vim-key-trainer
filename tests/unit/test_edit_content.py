@@ -3,6 +3,7 @@
 # Standard library imports
 import copy
 import json
+from dataclasses import replace
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
@@ -17,7 +18,9 @@ from vim_key_trainer.content.edit_loader import (
     load_edit_lessons,
     validate_edit_replay,
 )
-from vim_key_trainer.domain.editing import goal_matches
+from vim_key_trainer.domain.edit_builder import GuideBuilder
+from vim_key_trainer.domain.edit_templates import ESC, characters
+from vim_key_trainer.domain.editing import EditSegment, goal_matches
 from vim_key_trainer.domain.keys import KeyToken
 from vim_key_trainer.engine import EditEngine, EditorState
 
@@ -151,11 +154,52 @@ def test_final_goal_rejects_insert_pending_and_explicit_cursor_mismatch() -> Non
     assert goal_matches(lesson, EditorState(lesson.goal_lines, 0, 0))
     assert not goal_matches(lesson, EditorState(lesson.goal_lines, 0, 0, mode="insert"))
     assert not goal_matches(lesson, EditorState(lesson.goal_lines, 0, 0, pending="d"))
+    assert not goal_matches(lesson, EditorState(lesson.goal_lines, command_line="/"))
     data = raw_lesson()
     data["goal"]["cursor"] = [0, 14]
     explicit = load_edit_lesson_json(json.dumps(data))
     assert not goal_matches(explicit, EditorState(explicit.goal_lines, 0, 0))
     assert goal_matches(explicit, EditorState(explicit.goal_lines, 0, 14))
+
+
+def test_segment_cannot_start_with_unfinished_insert() -> None:
+    initial = EditorState(("old",), mode="insert")
+    builder = GuideBuilder(initial, frozenset({"i"}))
+    builder.record(characters("new") + (ESC,), "새 단어를 입력합니다.")
+    builder.finish_segment(0, 0)
+    lesson = replace(
+        get_edit_lesson("editing_numbers"),
+        initial=initial,
+        goal_lines=("newold",),
+        guide=tuple(builder.steps),
+        baseline=builder.steps[0].keys,
+        baseline_keys=len(builder.steps[0].keys),
+        segments=tuple(builder.segments),
+    )
+    with pytest.raises(ValueError, match="구간 경계"):
+        validate_edit_replay(lesson)
+
+
+def test_segment_target_must_fit_document_before_or_after_edit() -> None:
+    lesson = get_edit_lesson("editing_numbers")
+    segment = EditSegment("repair", 0, len(lesson.guide), 0, 2)
+    with pytest.raises(ValueError, match="문서 범위"):
+        validate_edit_replay(replace(lesson, segments=(segment,)))
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"start_step": False},
+        {"end_step": 1.5},
+        {"target_end_row": True},
+        {"prerequisite_ids": ("earlier", "earlier")},
+    ],
+)
+def test_invalid_segment_metadata_is_rejected(changes: dict[str, object]) -> None:
+    segment = EditSegment("repair", 0, 1, 0, 1)
+    with pytest.raises(ValueError):
+        replace(segment, **changes)
 
 
 def test_free_task_accepts_shorter_and_longer_solutions_than_baseline() -> None:

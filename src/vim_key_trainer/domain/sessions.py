@@ -6,10 +6,13 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 # Local imports
+from vim_key_trainer.domain.activities import ActivitySpec, BonusObjectiveResult
+from vim_key_trainer.domain.challenge import ChallengeSummary
 from vim_key_trainer.domain.commands import CommandSpec
 from vim_key_trainer.domain.document_missions import DocumentPracticeSpec
 from vim_key_trainer.domain.editing import EditMode, EditPracticeSpec
 from vim_key_trainer.domain.exercises import PracticeSpec
+from vim_key_trainer.domain.game_rules import objective_bonus_points
 from vim_key_trainer.domain.keys import KeyToken
 
 
@@ -101,6 +104,36 @@ class EditingSessionResult:
     guide_level: str
     practice_spec: EditPracticeSpec | None = None
     document_spec: DocumentPracticeSpec | None = None
+    challenge: ChallengeSummary | None = None
+    activity: ActivitySpec | None = None
+    bonus_objectives: tuple[BonusObjectiveResult, ...] = ()
+    code_source_id: str | None = None
+
+    @property
+    def bonus_points(self) -> int:
+        """선택 목표는 기본 정답·별과 별개이며 전체 완료에만 보상을 준다."""
+        return objective_bonus_points(
+            objectives=self.bonus_objectives,
+            completion_eligible=self.completion_eligible,
+        )
+
+    @property
+    def completion_eligible(self) -> bool:
+        """자동 복구·부분 실패·복수전은 문서 전체 완료 보상을 만들지 않는다."""
+        return self.state == SessionState.COMPLETED and (
+            self.challenge is None
+            or (self.challenge.full_clear and self.challenge.revenge_of is None)
+        )
+
+    @property
+    def efficiency_eligible(self) -> bool:
+        """시스템이 만든 문서 변경은 사용자 입력 효율·속도 기록에서 제외한다."""
+        return self.challenge is None or (
+            self.challenge.full_clear
+            and not self.challenge.timeout_count
+            and not self.challenge.auto_repair_count
+            and self.challenge.revenge_of is None
+        )
 
     @property
     def delta(self) -> int:

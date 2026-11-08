@@ -4,6 +4,7 @@
 from vim_key_trainer.domain.sessions import (
     CommandSessionResult,
     EditingSessionResult,
+    SessionState,
     StoredResult,
 )
 
@@ -24,6 +25,15 @@ def comparison_key(result: StoredResult) -> ComparisonKey:
             result.extra_hints,
             result.step_returns,
             result.pause_count > 0,
+            (
+                result.challenge.options,
+                result.challenge.time_rule_version,
+                result.challenge.revenge_of,
+                tuple(segment.segment_id for segment in result.challenge.segments),
+            )
+            if result.challenge is not None
+            else None,
+            result.activity,
         )
     if isinstance(result, CommandSessionResult):
         return (
@@ -52,10 +62,21 @@ def comparison_key(result: StoredResult) -> ComparisonKey:
 
 def is_better_result(candidate: StoredResult, previous: StoredResult) -> bool:
     """같은 비교 조건의 완료 결과를 입력 효율·정확도·시간 순으로 비교한다."""
-    if type(candidate) is not type(previous):
+    if (
+        type(candidate) is not type(previous)
+        or comparison_key(candidate) != comparison_key(previous)
+        or not record_eligible(candidate)
+    ):
         return False
     if isinstance(candidate, EditingSessionResult):
         assert isinstance(previous, EditingSessionResult)
+        if candidate.challenge is not None:
+            assert previous.challenge is not None
+            if candidate.challenge.score != previous.challenge.score:
+                return candidate.challenge.score > previous.challenge.score
+            if candidate.elapsed_seconds != previous.elapsed_seconds:
+                return _has_better_time(candidate, previous)
+            return candidate.key_count < previous.key_count
         if candidate.mode != previous.mode:
             return False
         if candidate.mode == "free":
@@ -70,6 +91,13 @@ def is_better_result(candidate: StoredResult, previous: StoredResult) -> bool:
     if candidate_ratio != previous_ratio:
         return candidate_ratio > previous_ratio
     return _has_better_time(candidate, previous)
+
+
+def record_eligible(result: StoredResult) -> bool:
+    """부분 실패·자동 복구·복수전은 전체 완료 개인 기록을 갱신하지 않는다."""
+    if isinstance(result, EditingSessionResult):
+        return result.completion_eligible and result.efficiency_eligible
+    return result.state == SessionState.COMPLETED
 
 
 def _has_better_time(candidate: StoredResult, previous: StoredResult) -> bool:

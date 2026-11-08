@@ -18,16 +18,19 @@ from vim_key_trainer.content.document_missions import (
     list_document_collections,
     list_document_missions,
 )
-from vim_key_trainer.domain.achievements import summarize_learning
+from vim_key_trainer.domain.achievements import summarize_activities, summarize_learning
+from vim_key_trainer.domain.decorations import summarize_decorations
 from vim_key_trainer.domain.edit_generator import (
     EditProfile,
     list_code_edit_profiles,
     list_edit_profiles,
 )
 from vim_key_trainer.domain.editing import EditMode
-from vim_key_trainer.domain.sessions import EditingSessionResult, SessionState
+from vim_key_trainer.domain.preferences import AppearanceSettings
+from vim_key_trainer.domain.sessions import EditingSessionResult
 from vim_key_trainer.services.result_repository import ResultRepository
 from vim_key_trainer.ui.components import button, label, scroll_page
+from vim_key_trainer.ui.widgets.collection_workshop import CollectionWorkshop
 
 _MODE_TITLES: tuple[tuple[EditMode, str], ...] = (
     ("guided", "가이드"),
@@ -81,6 +84,8 @@ class EditCategoryPage(QWidget):
     general_requested = Signal()
     techniques_requested = Signal()
     practice_requested = Signal(str)
+    activity_requested = Signal(str)
+    appearance_changed = Signal(object)
 
     def __init__(self) -> None:
         super().__init__()
@@ -190,12 +195,29 @@ class EditCategoryPage(QWidget):
             grid.setColumnStretch(column, 1)
         layout.addLayout(grid)
 
+        activities = QHBoxLayout()
+        self.daily_button = button(
+            "오늘의 미션 →", "editingDaily", enter_activates=True
+        )
+        self.daily_button.clicked.connect(lambda: self.activity_requested.emit("daily"))
+        self.boss_button = button("보스 문서 →", "editingBoss", enter_activates=True)
+        self.boss_button.clicked.connect(lambda: self.activity_requested.emit("boss"))
+        activities.addWidget(self.daily_button)
+        activities.addWidget(self.boss_button)
+        activities.addStretch()
+        layout.addLayout(activities)
+        self.activity_progress = label("", "muted", wrap=True)
+        layout.addWidget(self.activity_progress)
+
         self.achievements = label(
             "첫 문서 복구로 첫 훈장을 모아 보세요.", "eyebrow", wrap=True
         )
         layout.addWidget(self.achievements)
         self.collection_progress = label("", "eyebrow", wrap=True)
         layout.addWidget(self.collection_progress)
+        self.workshop = CollectionWorkshop()
+        self.workshop.appearance_changed.connect(self.appearance_changed.emit)
+        layout.addWidget(self.workshop)
         issues = document_catalog_issues()
         if issues:
             layout.addWidget(
@@ -207,14 +229,27 @@ class EditCategoryPage(QWidget):
             )
         layout.addStretch()
 
+    @property
+    def appearance_settings(self) -> AppearanceSettings:
+        return self.workshop.appearance_settings
+
+    def configure_appearance(self, settings: AppearanceSettings) -> None:
+        self.workshop.configure_appearance(settings)
+
     def refresh(self, repository: ResultRepository) -> None:
         completed = sum(
-            isinstance(result, EditingSessionResult)
-            and result.state == SessionState.COMPLETED
+            isinstance(result, EditingSessionResult) and result.completion_eligible
             for result in repository.results
         )
         learning = summarize_learning(
             repository.results, (mission.id for mission in self.missions)
+        )
+        self.workshop.set_progress(learning, summarize_decorations(repository.results))
+        activity = summarize_activities(repository.results)
+        self.activity_progress.setText(
+            f"오늘의 미션 {activity.daily_completions}개 · "
+            f"보스 문서 {activity.boss_completions}개 · "
+            f"모은 목표 보너스 {activity.bonus_points:,}점"
         )
         self.summary.setText(
             f"학습 완료 {completed}회 · "
@@ -296,7 +331,7 @@ class EditTechniquePage(QWidget):
         profile_ids = {profile.id for profile in self.profiles}
         completed = sum(
             isinstance(result, EditingSessionResult)
-            and result.state == SessionState.COMPLETED
+            and result.completion_eligible
             and result.lesson_id in profile_ids
             for result in repository.results
         )

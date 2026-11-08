@@ -31,7 +31,7 @@ from vim_key_trainer.domain.keys import KeyToken
 from vim_key_trainer.domain.practice_words import PRACTICE_WORDS, practice_word
 from vim_key_trainer.engine import SUPPORTED_COMMANDS, EditEngine, EditorState
 
-DOCUMENT_GENERATOR_VERSION = 9
+DOCUMENT_GENERATOR_VERSION = 10
 CorruptionKind = Literal[
     "insert",
     "prefix",
@@ -919,7 +919,9 @@ def generate_document_problem(
     guide = GuideBuilder(initial, SUPPORTED_COMMANDS)
     used_families: Counter[str] = Counter()
     for operation in reversed(operations):
+        start_step = len(guide.steps)
         _record_repair(guide, operation, used_families, weights)
+        guide.finish_segment(start_step, operation.row)
     if guide.engine.state.lines != mission.goal_lines:
         raise ValueError("손상 문서의 복원 풀이가 원문과 다릅니다.")
     baseline = tuple(key for step in guide.steps for key in step.keys)
@@ -941,6 +943,7 @@ def generate_document_problem(
         baseline_keys=len(baseline),
         generator_version=DOCUMENT_GENERATOR_VERSION,
         document_spec=spec,
+        segments=tuple(guide.segments),
     )
     return DocumentCorruptionPlan(
         lesson,

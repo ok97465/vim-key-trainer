@@ -8,6 +8,16 @@ QWidget {
 }
 QMainWindow { background: #10151d; }
 QLabel { background: transparent; }
+QCheckBox { background: transparent; spacing: 7px; }
+QSlider { background: transparent; }
+QSlider::groove:horizontal {
+    background: #293848; height: 5px; border-radius: 2px;
+}
+QSlider::sub-page:horizontal { background: #98c78b; border-radius: 2px; }
+QSlider::handle:horizontal {
+    background: #d0efa9; border: 1px solid #9cba7b; width: 14px;
+    margin: -5px 0; border-radius: 7px;
+}
 QFrame#sidebar { background: #151c26; border-right: 1px solid #293342; }
 QFrame#card { background: #19212d; border: 1px solid #2c3747; border-radius: 12px; }
 QFrame#card QLabel { background: transparent; }

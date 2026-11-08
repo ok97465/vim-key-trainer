@@ -26,7 +26,7 @@ from vim_key_trainer.domain.keys import KeyToken
 from vim_key_trainer.domain.practice_words import IdentifierPool, practice_word
 from vim_key_trainer.engine import SUPPORTED_COMMANDS, EditEngine, EditorState
 
-CODE_GENERATOR_VERSION = 7
+CODE_GENERATOR_VERSION = 8
 
 
 @dataclass(frozen=True, slots=True)

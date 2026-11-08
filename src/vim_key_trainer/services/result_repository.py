@@ -8,7 +8,6 @@ from vim_key_trainer.domain.editing import EditMode
 from vim_key_trainer.domain.sessions import (
     CommandSessionResult,
     EditingSessionResult,
-    SessionState,
     StoredResult,
 )
 from vim_key_trainer.services.result_codec import decode_result, encode_result
@@ -16,6 +15,7 @@ from vim_key_trainer.services.result_comparison import (
     ComparisonKey,
     comparison_key,
     is_better_result,
+    record_eligible,
 )
 
 
@@ -92,7 +92,7 @@ class MemoryResultRepository:
     def _record_result(self, result: StoredResult) -> bool:
         """검증한 결과를 한 번만 메모리 진행도와 개인 기록에 반영한다."""
         self._results[result.attempt_id] = result
-        if result.state != SessionState.COMPLETED:
+        if not record_eligible(result):
             return False
         self._completed_count += 1
         if isinstance(result, EditingSessionResult):

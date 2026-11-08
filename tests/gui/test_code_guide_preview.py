@@ -11,6 +11,7 @@ from PySide6.QtCore import QPoint, QRectF, Qt
 from pytestqt.qtbot import QtBot
 
 # Local imports
+from vim_key_trainer.domain.challenge import ChallengeOptions
 from vim_key_trainer.domain.edit_builder import GuideBuilder
 from vim_key_trainer.domain.edit_templates import characters
 from vim_key_trainer.domain.editing import (
@@ -28,8 +29,13 @@ from vim_key_trainer.ui.widgets.edit_comparison import EditComparison
 
 @pytest.fixture
 def window(qtbot: QtBot, monkeypatch: pytest.MonkeyPatch) -> Iterator[MainWindow]:
-    def create_session(lesson: EditLesson, mode: EditMode) -> EditingSession:
-        return EditingSession(lesson, mode, clock_ns=lambda: 0)
+    def create_session(
+        lesson: EditLesson,
+        mode: EditMode,
+        *,
+        challenge: ChallengeOptions,
+    ) -> EditingSession:
+        return EditingSession(lesson, mode, clock_ns=lambda: 0, challenge=challenge)
 
     monkeypatch.setattr(
         "vim_key_trainer.ui.edit_practice.EditingSession", create_session

@@ -9,6 +9,7 @@ from random import Random
 from typing import Literal
 
 # Local imports
+from vim_key_trainer.domain.activities import ActivitySpec
 from vim_key_trainer.domain.code_samples import CodeExcerpt
 from vim_key_trainer.domain.document_missions import DocumentPracticeSpec
 from vim_key_trainer.domain.edit_weights import EditTechniqueWeights
@@ -78,6 +79,43 @@ class GuideStep:
 
 
 @dataclass(frozen=True, slots=True)
+class EditSegment:
+    """이동부터 수정 종료까지의 가이드 범위. end_step/target_end_row는 배타적이다."""
+
+    id: str
+    start_step: int
+    end_step: int
+    target_start_row: int
+    target_end_row: int
+    prerequisite_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.id) is not str
+            or not self.id
+            or type(self.start_step) is not int
+            or type(self.end_step) is not int
+            or not 0 <= self.start_step < self.end_step
+        ):
+            raise ValueError("수정 구간의 ID 또는 가이드 범위가 잘못되었습니다.")
+        if (
+            type(self.target_start_row) is not int
+            or type(self.target_end_row) is not int
+            or not 0 <= self.target_start_row < self.target_end_row
+        ):
+            raise ValueError("수정 구간의 대상 범위가 잘못되었습니다.")
+        if (
+            type(self.prerequisite_ids) is not tuple
+            or any(
+                type(value) is not str or not value for value in self.prerequisite_ids
+            )
+            or len(set(self.prerequisite_ids)) != len(self.prerequisite_ids)
+            or self.id in self.prerequisite_ids
+        ):
+            raise ValueError("수정 구간의 선행 조건이 잘못되었습니다.")
+
+
+@dataclass(frozen=True, slots=True)
 class EditLesson:
     schema_version: int
     content_version: int
@@ -97,6 +135,8 @@ class EditLesson:
     generator_version: int = 0
     document_spec: DocumentPracticeSpec | None = None
     code_excerpt: CodeExcerpt | None = None
+    segments: tuple[EditSegment, ...] = ()
+    activity: ActivitySpec | None = None
 
     @property
     def signature(self) -> str:
@@ -134,6 +174,8 @@ class EditLesson:
             asdict(self.practice_spec) if self.practice_spec is not None else None,
             asdict(self.document_spec) if self.document_spec is not None else None,
             self.generator_version,
+            tuple(asdict(segment) for segment in self.segments),
+            asdict(self.activity) if self.activity is not None else None,
             (
                 excerpt.source.id,
                 excerpt.source.revision,
@@ -170,6 +212,7 @@ def goal_matches(lesson: EditLesson, state: EditorState) -> bool:
         state.lines == lesson.goal_lines
         and state.mode == "normal"
         and not state.pending
+        and not state.command_line
         and (
             lesson.goal_cursor is None
             or lesson.goal_cursor == (state.row, state.column)

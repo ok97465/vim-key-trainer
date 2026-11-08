@@ -125,7 +125,7 @@ def test_document_repair_versions_the_extended_word_command_conditions() -> None
         lesson.allowed_commands
     )
     assert lesson.content_version == mission.content_version == 6
-    assert lesson.generator_version == DOCUMENT_GENERATOR_VERSION == 9
+    assert lesson.generator_version == DOCUMENT_GENERATOR_VERSION == 10
     assert lesson.baseline_version == 8
 
 

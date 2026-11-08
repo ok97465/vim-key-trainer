@@ -311,7 +311,7 @@ def test_json_practice_remains_available_without_downloaded_sources(
     )
     spec = EditPracticeSpec("code_json", 0, 60)
     lesson = create_edit_problem(spec)
-    assert lesson.content_version == 3 and lesson.generator_version == 4
+    assert lesson.content_version == 3 and lesson.generator_version == 5
     assert lesson.code_excerpt is None
     assert len(lesson.goal_lines) == 60
     assert lesson == generate_edit_lesson(spec)

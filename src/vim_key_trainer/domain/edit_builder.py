@@ -8,7 +8,7 @@ from functools import lru_cache
 
 # Local imports
 from vim_key_trainer.domain.edit_templates import ENTER, characters, counted
-from vim_key_trainer.domain.editing import GuideStep
+from vim_key_trainer.domain.editing import EditSegment, GuideStep
 from vim_key_trainer.domain.keys import KeyToken
 from vim_key_trainer.engine import EditEngine, EditorState
 
@@ -334,6 +334,26 @@ class GuideBuilder:
     def __init__(self, initial: EditorState, allowed_commands: frozenset[str]) -> None:
         self.engine = EditEngine(initial, allowed_commands)
         self.steps: list[GuideStep] = []
+        self.segments: list[EditSegment] = []
+
+    def finish_segment(self, start_step: int, row: int, span: int = 1) -> None:
+        """생성기가 명시한 수정 레시피 전체를 하나의 구간으로 확정한다."""
+        state = self.engine.state
+        if state.mode != "normal" or state.pending or state.command_line:
+            raise ValueError("수정 구간은 Normal·대기 없음 상태로 끝나야 합니다.")
+        previous = self.segments[-1] if self.segments else None
+        if start_step != (previous.end_step if previous is not None else 0):
+            raise ValueError("수정 구간은 가이드를 빠짐없이 순서대로 포함해야 합니다.")
+        self.segments.append(
+            EditSegment(
+                id=f"segment_{len(self.segments) + 1}",
+                start_step=start_step,
+                end_step=len(self.steps),
+                target_start_row=row,
+                target_end_row=row + max(1, span),
+                prerequisite_ids=(previous.id,) if previous is not None else (),
+            )
+        )
 
     def record(self, keys: tuple[KeyToken, ...], text: str) -> None:
         for key in keys:

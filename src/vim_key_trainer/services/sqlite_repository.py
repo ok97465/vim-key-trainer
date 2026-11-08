@@ -25,7 +25,7 @@ from vim_key_trainer.services.result_codec import (
     encode_result,
     result_kind,
 )
-from vim_key_trainer.services.result_comparison import is_better_result
+from vim_key_trainer.services.result_comparison import is_better_result, record_eligible
 from vim_key_trainer.services.result_repository import MemoryResultRepository
 from vim_key_trainer.services.storage_version import STORAGE_VERSION
 
@@ -240,7 +240,7 @@ class SqliteResultRepository(MemoryResultRepository):
                     timestamp,
                 ),
             )
-            if not inserted.rowcount or result.state != SessionState.COMPLETED:
+            if not inserted.rowcount or not record_eligible(result):
                 return
             self._connection.execute(
                 """INSERT INTO lesson_progress VALUES (?, ?, ?, ?, 1, ?)
@@ -268,6 +268,7 @@ class SqliteResultRepository(MemoryResultRepository):
                 previous[0] in self._quarantined_attempts
                 or previous[1] != SessionState.COMPLETED.value
                 or previous[2] != digest
+                or not record_eligible(decode_result(previous[3]))
             ):
                 # 누락·손상된 참조를 복구할 때 기존의 더 좋은 기록을 보존한다.
                 best = None
@@ -279,7 +280,9 @@ class SqliteResultRepository(MemoryResultRepository):
                     if attempt_id in self._quarantined_attempts:
                         continue
                     candidate = decode_result(stored_payload)
-                    if best is None or is_better_result(candidate, best):
+                    if record_eligible(candidate) and (
+                        best is None or is_better_result(candidate, best)
+                    ):
                         best = candidate
             elif previous is not None and not is_better_result(
                 result, decode_result(previous[3])

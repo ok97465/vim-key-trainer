@@ -4,6 +4,7 @@
 import hashlib
 import json
 import math
+import re
 from collections.abc import Mapping
 from dataclasses import fields, is_dataclass, replace
 from types import MappingProxyType
@@ -13,6 +14,9 @@ from typing import Any, Literal, cast
 from pydantic import BaseModel, ConfigDict, StrictInt, TypeAdapter
 
 # Local imports
+from vim_key_trainer.domain.activities import evaluate_objectives
+from vim_key_trainer.domain.challenge import TIME_RULE_VERSION, TIME_RULES
+from vim_key_trainer.domain.game_rules import bomb_score
 from vim_key_trainer.domain.sessions import (
     CommandSessionResult,
     EditingSessionResult,
@@ -135,6 +139,18 @@ def _validate_editing_statistics(result: EditingSessionResult) -> None:
         or result.practice_spec is not None
     ):
         raise ValueError("문서 손상 생성 조건이 결과의 미션과 다릅니다.")
+    if result.code_source_id is not None and (
+        re.fullmatch(r"[a-z][a-z0-9_]*", result.code_source_id) is None
+        or result.lesson_id not in {"code_python", "code_cpp"}
+        or result.practice_spec is None
+    ):
+        raise ValueError("완료한 코드 원문의 ID·연습 유형이 올바르지 않습니다.")
+    if (
+        result.practice_spec is not None
+        and result.practice_spec.code_source_id is not None
+        and result.practice_spec.code_source_id != result.code_source_id
+    ):
+        raise ValueError("완료한 코드 원문이 시작 시 선택한 원문과 다릅니다.")
     if result.state == SessionState.COMPLETED and result.key_count == 0:
         raise ValueError("완료한 편집 결과에는 채점 입력이 필요합니다.")
     if result.mode == "free":
@@ -154,12 +170,147 @@ def _validate_editing_statistics(result: EditingSessionResult) -> None:
         or result.incorrect is None
         or result.max_combo is None
         or result.correct + result.incorrect != result.key_count
-        or (result.state == SessionState.COMPLETED and result.correct == 0)
+        or (
+            result.state == SessionState.COMPLETED
+            and result.correct == 0
+            and (result.challenge is None or not result.challenge.timeout_count)
+        )
     ):
         raise ValueError("가이드 입력 통계가 누적 입력 수와 다릅니다.")
     _validate_accuracy(
         result.correct, result.incorrect, result.accuracy, result.max_combo
     )
+
+
+def _validate_challenge(result: EditingSessionResult) -> None:
+    challenge = result.challenge
+    if challenge is None:
+        return
+    if (
+        challenge.options.kind != "bomb"
+        or challenge.time_rule_version != TIME_RULE_VERSION
+        or not challenge.segments
+        or len(challenge.segments) > 1000
+        or (
+            challenge.revenge_of is not None
+            and challenge.revenge_of != result.lesson_signature
+        )
+    ):
+        raise ValueError("폭탄 도전의 종류·시간 규칙·구간 조건이 올바르지 않습니다.")
+    if result.mode == "free" and (
+        len(challenge.segments) != 1
+        or challenge.segments[0].segment_id != "document"
+        or challenge.auto_repair_count
+        or challenge.revenge_of is not None
+    ):
+        raise ValueError(
+            "자유 풀이 폭탄 도전은 자동 복구·복수전 없이 문서 전체를 잽니다."
+        )
+    maximum_ms = (
+        TIME_RULES.free_maximum_ms if result.mode == "free" else TIME_RULES.maximum_ms
+    )
+    seen: set[str] = set()
+    pending = False
+    chain = 0
+    max_chain = 0
+    for segment in challenge.segments:
+        if (
+            not segment.segment_id
+            or segment.segment_id in seen
+            or not math.isfinite(segment.limit_seconds)
+            or not (
+                TIME_RULES.minimum_ms / 1000
+                <= segment.limit_seconds
+                <= maximum_ms / 1000
+            )
+            or not math.isclose(
+                segment.limit_seconds * 1000 / TIME_RULES.rounding_ms,
+                round(segment.limit_seconds * 1000 / TIME_RULES.rounding_ms),
+                rel_tol=0,
+                abs_tol=1e-9,
+            )
+            or not math.isfinite(segment.elapsed_seconds)
+            or segment.elapsed_seconds < 0
+            or segment.elapsed_seconds > segment.limit_seconds
+            or (segment.auto_repaired and segment.verdict != "timeout")
+            or (segment.auto_repaired and not challenge.options.auto_repair)
+        ):
+            raise ValueError("폭탄 구간의 ID·시간·자동 복구 판정이 올바르지 않습니다.")
+        seen.add(segment.segment_id)
+        if segment.verdict == "pending":
+            if pending and segment.elapsed_seconds != 0:
+                raise ValueError("아직 활성화되지 않은 구간에 활성 시간이 있습니다.")
+            pending = True
+        elif pending:
+            raise ValueError("대기 중인 폭탄 구간 뒤에 정산된 구간이 있습니다.")
+        if segment.verdict == "timeout":
+            if not math.isclose(
+                segment.elapsed_seconds, segment.limit_seconds, abs_tol=1e-9
+            ):
+                raise ValueError("시간 초과 구간의 활성 시간이 제한시간과 다릅니다.")
+            chain = 0
+        elif segment.verdict == "direct":
+            if segment.elapsed_seconds >= segment.limit_seconds:
+                raise ValueError("직접 해결한 구간이 제한시간에 도달했습니다.")
+            chain += 1
+            max_chain = max(max_chain, chain)
+        elif segment.elapsed_seconds >= segment.limit_seconds:
+            raise ValueError("대기 중인 구간이 제한시간에 도달했습니다.")
+    completed = result.state == SessionState.COMPLETED
+    full_clear = completed and challenge.direct_count == challenge.segment_count
+    if (
+        (completed and pending)
+        or challenge.full_clear != full_clear
+        or challenge.max_chain != max_chain
+        or sum(segment.elapsed_seconds for segment in challenge.segments)
+        > result.elapsed_seconds + 1e-8
+        or challenge.score
+        != bomb_score(
+            segments=challenge.segments,
+            extra_hints=result.extra_hints,
+            step_returns=result.step_returns,
+        )
+        or (not result.completion_eligible and result.stars != 0)
+    ):
+        raise ValueError("폭탄 도전의 완료·점수·시간·연속 해체 합계가 다릅니다.")
+
+
+def _validate_activity(result: EditingSessionResult) -> None:
+    activity = result.activity
+    if activity is None:
+        if result.bonus_objectives:
+            raise ValueError("선택 목표는 시작 시 확정한 미션 조건이 필요합니다.")
+        return
+    if activity.kind == "daily":
+        spec = result.practice_spec
+        if (
+            spec is None
+            or result.lesson_id != activity.profile_id
+            or spec.profile_id != activity.profile_id
+            or spec.seed != activity.seed
+            or spec.document_lines != activity.document_lines
+            or spec.technique_weights is not None
+            or spec.code_source_id is not None
+            or result.document_spec is not None
+        ):
+            raise ValueError("오늘의 미션 조건이 원래 문제와 다릅니다.")
+    elif (
+        result.lesson_id != "boss_observatory"
+        or result.practice_spec is not None
+        or result.document_spec is not None
+    ):
+        raise ValueError("보스 미션 조건이 원래 문제와 다릅니다.")
+    expected = evaluate_objectives(
+        activity.objectives,
+        eligible=result.completion_eligible,
+        extra_hints=result.extra_hints,
+        key_count=result.key_count,
+        baseline_keys=result.baseline_keys,
+        efficiency_eligible=result.efficiency_eligible,
+        all_direct=result.challenge is not None and result.challenge.full_clear,
+    )
+    if result.bonus_objectives != expected:
+        raise ValueError("선택 목표의 판정이 완료 상태·입력 조건과 다릅니다.")
 
 
 def _validate_typing_statistics(result: SessionResult | CommandSessionResult) -> None:
@@ -223,6 +374,8 @@ def decode_result(payload: str) -> StoredResult:
         raise ValueError("저장된 결과의 상태·시간·별·시도 ID가 올바르지 않습니다.")
     if isinstance(result, EditingSessionResult):
         _validate_editing_statistics(result)
+        _validate_challenge(result)
+        _validate_activity(result)
     else:
         _validate_typing_statistics(result)
         result = replace(result, errors=MappingProxyType(dict(result.errors)))

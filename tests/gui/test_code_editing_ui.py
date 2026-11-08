@@ -15,6 +15,7 @@ from pytestqt.qtbot import QtBot
 # Local imports
 from vim_key_trainer.content.code_corpus import load_code_sources
 from vim_key_trainer.content.document_missions import list_document_missions
+from vim_key_trainer.domain.challenge import ChallengeOptions
 from vim_key_trainer.domain.edit_generator import get_edit_profile
 from vim_key_trainer.domain.editing import EditLesson, EditMode, EditPracticeSpec
 from vim_key_trainer.domain.keys import KeyToken
@@ -460,8 +461,15 @@ def test_failed_code_document_selection_restores_selection_and_attempt(
 ) -> None:
     now = [0]
 
-    def create_session(lesson: EditLesson, mode: EditMode) -> EditingSession:
-        return EditingSession(lesson, mode, clock_ns=lambda: now[0])
+    def create_session(
+        lesson: EditLesson,
+        mode: EditMode,
+        *,
+        challenge: ChallengeOptions,
+    ) -> EditingSession:
+        return EditingSession(
+            lesson, mode, clock_ns=lambda: now[0], challenge=challenge
+        )
 
     monkeypatch.setattr(
         "vim_key_trainer.ui.edit_practice.EditingSession", create_session

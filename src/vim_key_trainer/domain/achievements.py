@@ -9,9 +9,9 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 # Local imports
+from vim_key_trainer.domain.activities import BONUS_POINTS, BonusObjective
 from vim_key_trainer.domain.sessions import (
     EditingSessionResult,
-    SessionState,
     StoredResult,
 )
 
@@ -33,6 +33,40 @@ class LearningSummary:
     badges: tuple[Badge, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class ActivitySummary:
+    daily_completions: int
+    boss_completions: int
+    bonus_points: int
+    completed_keys: frozenset[tuple[object, ...]]
+
+
+def summarize_activities(results: Iterable[StoredResult]) -> ActivitySummary:
+    """같은 날짜·같은 보스의 반복과 저장 재시도는 추가 보상을 주지 않는다."""
+    completed: dict[tuple[object, ...], set[BonusObjective]] = {}
+    attempts: set[str] = set()
+    for result in results:
+        if (
+            not isinstance(result, EditingSessionResult)
+            or result.activity is None
+            or not result.completion_eligible
+            or result.attempt_id in attempts
+        ):
+            continue
+        attempts.add(result.attempt_id)
+        key = result.activity.reward_key()
+        goals = completed.setdefault(key, set())
+        goals.update(goal.id for goal in result.bonus_objectives if goal.achieved)
+    return ActivitySummary(
+        daily_completions=sum(key[0] == "daily" for key in completed),
+        boss_completions=sum(key[0] == "boss" for key in completed),
+        bonus_points=sum(
+            BONUS_POINTS[goal] for goals in completed.values() for goal in goals
+        ),
+        completed_keys=frozenset(completed),
+    )
+
+
 def summarize_learning(
     results: Iterable[StoredResult],
     mission_ids: Iterable[str],
@@ -43,7 +77,7 @@ def summarize_learning(
     for result in results:
         if (
             isinstance(result, EditingSessionResult)
-            and result.state == SessionState.COMPLETED
+            and result.completion_eligible
             and result.lesson_id in available
         ):
             attempts.setdefault(result.attempt_id, result)

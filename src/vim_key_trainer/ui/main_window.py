@@ -4,19 +4,24 @@
 from secrets import randbelow
 
 # Third party imports
-from PySide6.QtCore import QEvent, QSignalBlocker, QSize, Qt, QTimer
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtCore import QEvent, QRect, QSignalBlocker, QSize, Qt, QTimer
+from PySide6.QtGui import QCloseEvent, QScreen, QShowEvent
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
+    QCheckBox,
     QComboBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QMainWindow,
     QProgressBar,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSlider,
     QSpinBox,
     QStackedWidget,
     QVBoxLayout,
@@ -42,11 +47,16 @@ from vim_key_trainer.domain.editing import (
     random_edit_document_lines,
 )
 from vim_key_trainer.domain.exercises import EXERCISES, PracticeSpec
+from vim_key_trainer.domain.preferences import AppearanceSettings, PresentationSettings
 from vim_key_trainer.domain.sessions import (
     CommandSessionResult,
     InputResult,
     SessionResult,
     SessionState,
+)
+from vim_key_trainer.services.activity_problem_factory import (
+    create_boss_problem,
+    create_daily_problem,
 )
 from vim_key_trainer.services.document_problem_factory import (
     create_random_document_problem,
@@ -57,6 +67,7 @@ from vim_key_trainer.services.result_repository import (
     ResultRepository,
 )
 from vim_key_trainer.services.session_service import PracticeSession
+from vim_key_trainer.services.settings_repository import AppSettings, SettingsRepository
 from vim_key_trainer.ui.branding import AUTHOR, WINDOW_TITLE, load_icon
 from vim_key_trainer.ui.command_practice import CommandPracticePage
 from vim_key_trainer.ui.components import button, label, scroll_page
@@ -83,12 +94,24 @@ def percentage(value: float | None) -> str:
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, repository: ResultRepository | None = None) -> None:
+    def __init__(
+        self,
+        repository: ResultRepository | None = None,
+        *,
+        settings_repository: SettingsRepository | None = None,
+    ) -> None:
         super().__init__()
+        self._settings_repository = settings_repository
+        self._app_settings = (
+            settings_repository.load()
+            if settings_repository is not None
+            else AppSettings()
+        )
         self.setWindowTitle(WINDOW_TITLE)
         self.setWindowIcon(load_icon("ok97465"))
-        self.resize(1200, 800)
-        self.setMinimumSize(1200, 800)
+        self.resize(1440, 900)
+        self.setMinimumSize(760, 560)
+        self._screen_connected = False
         self.session: PracticeSession | None = None
         self.repository = (
             repository if repository is not None else MemoryResultRepository()
@@ -105,22 +128,29 @@ class MainWindow(QMainWindow):
         self._cheatsheet_return_page: QWidget | None = None
         self._cheatsheet_return_focus: QWidget | None = None
         self._cheatsheet_return_nav: QPushButton | None = None
+        self._settings_return_page: QWidget | None = None
 
         root = QWidget()
         self.setCentralWidget(root)
         shell = QHBoxLayout(root)
+        shell.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
         shell.setContentsMargins(0, 0, 0, 0)
         shell.setSpacing(0)
         shell.addWidget(self._make_sidebar())
         self.stack = QStackedWidget()
+        self.stack.setMinimumSize(0, 0)
+        self.stack.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.stack.setObjectName("pages")
         shell.addWidget(self.stack, 1)
         self.numbers_page = self._make_numbers_menu()
         self.commands_menu_page = self._make_commands_menu()
         self.editing_menu_page = EditCategoryPage()
+        self.editing_menu_page.configure_appearance(self._app_settings.appearance)
+        self.editing_menu_page.refresh(self.repository)
         self.editing_menu_page.general_requested.connect(self.show_general_editing)
         self.editing_menu_page.techniques_requested.connect(self.show_technique_editing)
         self.editing_menu_page.practice_requested.connect(self.prepare_editing)
+        self.editing_menu_page.activity_requested.connect(self.prepare_activity)
         self.editing_techniques_page = EditTechniquePage()
         self.editing_techniques_page.practice_requested.connect(self.prepare_editing)
         self.editing_techniques_page.categories_requested.connect(self.show_editing)
@@ -128,12 +158,22 @@ class MainWindow(QMainWindow):
         self.command_page = CommandPracticePage(self.repository)
         self.command_page.leave_requested.connect(self.show_commands_menu)
         self.edit_practice = EditPracticePage(
-            self.repository, technique_weights=self._edit_weights
+            self.repository,
+            technique_weights=self._edit_weights,
+            challenge=self._app_settings.challenge,
+            presentation=self._app_settings.presentation,
+            record_rival=self._app_settings.record_rival,
+            appearance=self.editing_menu_page.appearance_settings,
         )
+        self.editing_menu_page.appearance_changed.connect(self._appearance_changed)
+        self.edit_practice.document_font_spin.setValue(self._app_settings.font_size)
+        self.edit_practice.preferences_changed.connect(self._save_settings)
         self.edit_practice.leave_requested.connect(self._leave_editing)
         self.result_page = self._make_result()
         self.diagnostic_page = self._make_diagnostics()
         self.settings_page = self._make_settings()
+        if settings_repository is not None and settings_repository.last_error:
+            self.settings_status.setText(settings_repository.last_error)
         self.cheatsheet_page = VimCheatSheetPage()
         self.cheatsheet_page.return_requested.connect(self.return_from_cheatsheet)
         for page in (
@@ -160,11 +200,56 @@ class MainWindow(QMainWindow):
         self.storage_timer.timeout.connect(self._refresh_storage_status)
         self.storage_timer.start()
 
+    def fit_to_work_area(self, area: QRect | None = None) -> None:
+        """작은 모니터에서도 제목 줄과 주요 조작이 작업 영역 안에 있게 한다."""
+        screen = self.screen()
+        if area is None:
+            if screen is None:
+                return
+            area = screen.availableGeometry()
+        frame = self.frameGeometry()
+        # 제목 표시줄까지 포함한 외곽이 화면 밖으로 나가지 않게 여유를 둔다.
+        extra_width = max(0, frame.width() - self.width())
+        extra_height = max(0, frame.height() - self.height())
+        available_width = max(1, area.width() - extra_width)
+        available_height = max(1, area.height() - extra_height)
+        self.setMinimumSize(min(760, available_width), min(560, available_height))
+        self.resize(
+            min(self.width(), available_width),
+            min(self.height(), available_height),
+        )
+        frame = self.frameGeometry()
+        self.move(
+            max(area.left(), min(frame.left(), area.right() - frame.width() + 1)),
+            max(area.top(), min(frame.top(), area.bottom() - frame.height() + 1)),
+        )
+
+    def _screen_changed(self, screen: QScreen) -> None:
+        self.fit_to_work_area(screen.availableGeometry())
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        handle = self.windowHandle()
+        if handle is not None and not self._screen_connected:
+            handle.screenChanged.connect(self._screen_changed)
+            self._screen_connected = True
+            self.fit_to_work_area()
+
     def _make_sidebar(self) -> QFrame:
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
         sidebar.setFixedWidth(195)
-        layout = QVBoxLayout(sidebar)
+        outer = QVBoxLayout(sidebar)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        outer.addWidget(scroll)
+        content = QWidget()
+        content.setObjectName("sidebarContent")
+        content.setStyleSheet("QWidget#sidebarContent { background: #151c26; }")
+        scroll.setWidget(content)
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(20, 30, 20, 24)
         layout.setSpacing(14)
         layout.addWidget(label("vim_", "brand"))
@@ -527,7 +612,7 @@ class MainWindow(QMainWindow):
         page, layout = self._page(
             "PRACTICE SETTINGS",
             "나에게 맞는 연습",
-            "다음 연습부터 적용합니다. 현재 설정은 앱을 닫을 때 초기화됩니다.",
+            "도전 조건은 다음 시도부터, 소리와 화면 효과는 현재 연습에도 적용합니다.",
         )
         frame, box = card()
         box.addWidget(label("숫자·기호의 총 목표 길이", "sectionTitle"))
@@ -568,22 +653,110 @@ class MainWindow(QMainWindow):
             )
         )
         layout.addWidget(frame)
-        layout.addWidget(
-            label(
-                "효과음은 사용하지 않습니다. 현재 화면에는 움직이는 연출이 없습니다.",
-                "muted",
-                wrap=True,
-            )
+        layout.addWidget(self._make_effects_card())
+        self.settings_status = label(
+            "폭탄 도전 조건·효과·문서 글씨 크기를 이 기기에 저장합니다. "
+            "나머지 연습 설정은 앱 종료 시 초기화됩니다."
+            if self._settings_repository is not None
+            else "현재 세션에 적용합니다.",
+            "muted",
+            wrap=True,
         )
+        layout.addWidget(self.settings_status)
         layout.addWidget(self._make_edit_weight_card())
         self.settings_apply_button = button(
             "설정 적용 · 메뉴로", "settingsHome", primary=True
         )
-        self.settings_apply_button.clicked.connect(self.show_home)
+        self.settings_apply_button.clicked.connect(self.return_from_settings)
         layout.addWidget(self.settings_apply_button)
         self._refresh_edit_weight_preview()
         layout.addStretch()
         return page
+
+    def _make_effects_card(self) -> QFrame:
+        frame, box = card()
+        box.addWidget(label("폭탄 도전의 소리와 화면 효과", "sectionTitle"))
+        box.addWidget(
+            label(
+                "귀여운 해체 도우미와 짧은 반짝임으로 결과를 확인합니다. "
+                "도전 종류·제한시간·자동 수정은 문서 수정 준비 화면에서 고릅니다.",
+                "muted",
+                wrap=True,
+            )
+        )
+        settings = self._app_settings.presentation
+        self.effects_check = QCheckBox("화면 효과")
+        self.effects_check.setChecked(settings.effects)
+        self.reduced_motion_check = QCheckBox("모션 줄이기")
+        self.reduced_motion_check.setChecked(settings.reduced_motion)
+        self.success_sound_check = QCheckBox("성공음")
+        self.success_sound_check.setChecked(settings.success_sound)
+        self.failure_sound_check = QCheckBox("실패음")
+        self.failure_sound_check.setChecked(settings.failure_sound)
+        self.countdown_sound_check = QCheckBox("마지막 초읽기음")
+        self.countdown_sound_check.setChecked(settings.countdown_sound)
+        choices = QGridLayout()
+        for index, widget in enumerate(
+            (
+                self.effects_check,
+                self.reduced_motion_check,
+                self.success_sound_check,
+                self.failure_sound_check,
+                self.countdown_sound_check,
+            )
+        ):
+            choices.addWidget(widget, index // 3, index % 3)
+            widget.toggled.connect(self._presentation_changed)
+        box.addLayout(choices)
+        volume_row = QHBoxLayout()
+        volume_row.addWidget(label("효과음 음량", "muted"))
+        self.volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self.volume_slider.setAccessibleName("효과음 음량")
+        self.volume_slider.setRange(0, 100)
+        self.volume_slider.setValue(round(settings.volume * 100))
+        volume_row.addWidget(self.volume_slider, 1)
+        self.volume_value = label(f"{self.volume_slider.value()}%", "muted")
+        volume_row.addWidget(self.volume_value)
+        self.volume_slider.valueChanged.connect(self._presentation_changed)
+        box.addLayout(volume_row)
+        box.addWidget(
+            label(
+                "기본은 무음입니다. 효과를 꺼도 "
+                "남은 시간과 성공·실패는 계속 표시합니다.",
+                "muted",
+                wrap=True,
+            )
+        )
+        return frame
+
+    def _presentation_changed(self) -> None:
+        settings = PresentationSettings(
+            effects=self.effects_check.isChecked(),
+            reduced_motion=self.reduced_motion_check.isChecked(),
+            success_sound=self.success_sound_check.isChecked(),
+            failure_sound=self.failure_sound_check.isChecked(),
+            countdown_sound=self.countdown_sound_check.isChecked(),
+            volume=self.volume_slider.value() / 100,
+        )
+        self.volume_value.setText(f"{self.volume_slider.value()}%")
+        self.edit_practice.configure_effects(settings)
+        self._save_settings()
+
+    def _save_settings(self) -> None:
+        self._app_settings = AppSettings(
+            challenge=self.edit_practice.default_challenge,
+            presentation=self.edit_practice.presentation,
+            font_size=self.edit_practice.document_font_spin.value(),
+            record_rival=self.edit_practice.record_rival_enabled,
+            appearance=self.editing_menu_page.appearance_settings,
+        )
+        repository = self._settings_repository
+        if repository is not None and not repository.save(self._app_settings):
+            self.settings_status.setText(repository.last_error or "설정 저장 실패")
+
+    def _appearance_changed(self, settings: AppearanceSettings) -> None:
+        self.edit_practice.configure_appearance(settings)
+        self._save_settings()
 
     def _make_edit_weight_card(self) -> QFrame:
         frame, box = card()
@@ -667,6 +840,7 @@ class MainWindow(QMainWindow):
         self._refresh_edit_weight_preview()
 
     def _navigate(self, page: QWidget) -> None:
+        self._settings_return_page = None
         self._cheatsheet_return_page = None
         self._cheatsheet_return_focus = None
         self._cheatsheet_return_nav = None
@@ -685,6 +859,12 @@ class MainWindow(QMainWindow):
                     self.repository.save(result)
             self.command_page.abort()
             self.edit_practice.abort()
+            if (
+                page is not self.edit_practice
+                and self.edit_practice.session is not None
+            ):
+                self.edit_practice.session.release_transient()
+                self.edit_practice.failure_examples.clear()
             self.timer.stop()
             self.stack.setCurrentWidget(page)
         finally:
@@ -772,8 +952,40 @@ class MainWindow(QMainWindow):
         self.diagnostic_input.setFocus()
 
     def show_settings(self) -> None:
-        self._navigate(self.settings_page)
+        page = self.stack.currentWidget()
+        if page is self.edit_practice and self.edit_practice.session is not None:
+            session = self.edit_practice.session
+            if session.state in {
+                SessionState.READY,
+                SessionState.RUNNING,
+                SessionState.PAUSED,
+            }:
+                self.edit_practice.pause()
+                self._settings_return_page = page
+                self.stack.setCurrentWidget(self.settings_page)
+                self.settings_apply_button.setText("설정 적용 · 연습으로 돌아가기")
+            else:
+                self._navigate(self.settings_page)
+        elif page is not self.settings_page:
+            self._navigate(self.settings_page)
+            self.settings_apply_button.setText("설정 적용 · 메뉴로")
         self.settings_button.setChecked(True)
+
+    def return_from_settings(self) -> None:
+        page = self._settings_return_page
+        self._settings_return_page = None
+        self.settings_apply_button.setText("설정 적용 · 메뉴로")
+        if page is self.edit_practice:
+            self.stack.setCurrentWidget(page)
+            self.editing_button.setChecked(True)
+            (
+                self.edit_practice.pause_button
+                if self.edit_practice.session is not None
+                and self.edit_practice.session.state == SessionState.PAUSED
+                else self.edit_practice.start_button
+            ).setFocus()
+            return
+        self.show_home()
 
     def show_cheatsheet(self) -> None:
         page = self.stack.currentWidget()
@@ -927,6 +1139,20 @@ class MainWindow(QMainWindow):
                 )
             lesson = create_edit_problem(spec)
         except ValueError as error:
+            self.statusBar().showMessage(f"과제 열기 실패 · {error}")
+            self.statusBar().show()
+            return
+        self.prepare_editing_lesson(lesson)
+
+    def prepare_activity(self, kind: str) -> None:
+        try:
+            if kind == "daily":
+                lesson = create_daily_problem()
+            elif kind == "boss":
+                lesson = create_boss_problem(randbelow(2**32))
+            else:
+                raise ValueError("지원하지 않는 추가 도전입니다.")
+        except (ValueError, OSError) as error:
             self.statusBar().showMessage(f"과제 열기 실패 · {error}")
             self.statusBar().show()
             return

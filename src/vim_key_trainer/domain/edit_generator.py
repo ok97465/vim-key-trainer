@@ -27,8 +27,8 @@ from vim_key_trainer.domain.editing import (
 )
 from vim_key_trainer.engine import SUPPORTED_COMMANDS, EditorState
 
-EDIT_GENERATOR_VERSION = 8
-CODE_SOURCE_SELECTION_VERSION = 8
+EDIT_GENERATOR_VERSION = 9
+CODE_SOURCE_SELECTION_VERSION = 9
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,7 +119,7 @@ def edit_generator_version(
     if spec is not None and spec.code_source_id is not None:
         return CODE_SOURCE_SELECTION_VERSION
     if profile.id == "code_json":
-        return 4
+        return 5
     return (
         CODE_GENERATOR_VERSION if profile.language != "text" else EDIT_GENERATOR_VERSION
     )
@@ -169,6 +169,7 @@ def generate_edit_lesson(
     allowed = SUPPORTED_COMMANDS
     guide = GuideBuilder(initial, allowed)
     for recipe in plan.recipes:
+        start_step = len(guide.steps)
         for index, action in enumerate(recipe.actions):
             if index == 0 or action.column is not None:
                 if is_code:
@@ -191,6 +192,9 @@ def generate_edit_lesson(
                 else:
                     guide.navigate(recipe.row, action.column)
             guide.record(action.keys, action.text)
+        guide.finish_segment(
+            start_step, recipe.row, max(recipe.span, len(recipe.replacement))
+        )
     if (
         guide.engine.state.lines != plan.goal_lines
         or guide.engine.state.mode != "normal"
@@ -219,4 +223,5 @@ def generate_edit_lesson(
         practice_spec=spec,
         generator_version=edit_generator_version(profile, spec),
         code_excerpt=plan.code_excerpt,
+        segments=tuple(guide.segments),
     )

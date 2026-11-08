@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "version": 1,
+  "license": "MIT",
+  "license_file": "LICENSE.txt",
+  "assets": [
+    {
+      "file": "bomb-mascot.png",
+      "source": "OpenAI built-in image_gen",
+      "prompt": "Use case: stylized-concept. Asset type: high-resolution transparent game sprite for a polished dark desktop Vim typing practice application. Primary request: one extremely cute friendly round bomb mascot, premium soft clay 3D illustration, single character centered, facing front three-quarter. Squishy deep navy-blue spherical body, tiny black oval eyes with warm highlights, soft peach blush cheeks, small smiling mouth, little mint-green mitten hands and little feet. A short curved cream braided fuse with tiny warm golden star tip; friendly educational toy. Exquisite smooth silhouette, subtle felt/clay microtexture, gentle studio shading, mint rim light. Full body fully visible, generous transparent padding, isolated on genuinely transparent background. Clear compact silhouette readable at 48 px but beautifully detailed at high resolution. No text, no letters, no watermark, no background scene, no floor plane, no checkerboard, no weapons, no scary face. One mascot only, not a sheet.",
+      "version": 1,
+      "sha256": "07c832b669b0b2d73963ee0d2a9a1b4fe20d5e058f03cee5ab422e531f876d55"
+    },
+    {
+      "file": "success.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 1,
+      "sha256": "a0126b67800973a70809e698188ba5719bfd097a74169174acab56bf91401aec"
+    },
+    {
+      "file": "timeout.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 1,
+      "sha256": "6081ef86575e241dbe195dbbfada5657af28671d6a7e516c4c20c5c27e14495e"
+    },
+    {
+      "file": "countdown.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 1,
+      "sha256": "817bd9d9f111c5aefbe0d38c7c484e3c8239226609a111ac8254011d4dfede96"
+    },
+    {
+      "file": "library-workshop.png",
+      "source": "OpenAI built-in image_gen",
+      "version": 1,
+      "prompt": "Use case: stylized-concept. Asset type: premium high resolution decorative illustration for an offline desktop learning game's collection card. Primary request: a tiny cozy restored reading workshop/library as an exquisitely crafted cute 3D clay diorama, isolated on a genuinely transparent background. A compact open book-shaped room, warm walnut desk and rounded chair, three short shelves of colorful cream, mint and dusty lilac books, small arched window with warm amber glow, tiny leafy potted plant, a miniature navy round friendly bomb mascot with a cream star-tipped fuse sleeping beside an open book. Soft rounded forms, tactile soft clay and paper texture, lovely detailed book spines with no writing, beautiful mint rim light and warm indirect lighting. Composition: single diorama in a wide 3:2 landscape frame, full silhouette visible with transparent padding all around; front isometric viewpoint. Intended display 260px wide so composition must read compactly. Render beautifully crisp and polished high resolution, subtle shadows only inside the diorama. No text, letters, logos, watermark, floor outside the object, checkerboard, dark background, or multiple panels. Calm and inviting rather than busy.",
+      "sha256": "58a0b4af4504a63a2a6b26484694f4f488a83b80ec31d0a8c0eaff4d355cb19f"
+    },
+    {
+      "file": "cat-mascot.png",
+      "source": "OpenAI built-in image_gen",
+      "version": 1,
+      "prompt": "Use case: stylized-concept. Asset type: premium transparent mascot game sprite, one selectable cute bomb appearance for an educational desktop typing game. Primary request: one irresistibly cute mint cat-shaped round toy bomb, high quality soft clay 3D rendering. Single squishy pale mint spherical cat body with tiny rounded triangular cat ears, glossy black oval eyes, rosy peach cheeks, very small smiling cat mouth, little navy mitten paws and little rounded feet. Short curved braided cream fuse emerging between the ears, with tiny glowing golden star tip, friendly and calm, not scary. Front three-quarter view, full body centered, clean silhouette with ample transparent padding, isolated on genuinely transparent background. Tactile soft felt-clay surface, expertly sculpted smooth shapes, subtle studio shading and soft highlights, beautifully crisp detail at high resolution and readable at 48 pixels. No text, no watermark, no ground plane, no extra objects, no backgrounds, no checkerboard, no multiple characters, no panels.",
+      "sha256": "598eb7c3488b7f4fac2bce5e2a68ad88c2b3c59d29451085b33198830e1ca4c4"
+    }
+  ],
+  "license_sha256": "434b42fb127e9ac240562834fc8d0f6a58763969f4bf20ebbc845c23488e2101"
+}

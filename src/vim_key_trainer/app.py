@@ -9,6 +9,10 @@ from PySide6.QtWidgets import QApplication
 
 # Local imports
 from vim_key_trainer.services.application_storage import open_application_repository
+from vim_key_trainer.services.settings_repository import (
+    SettingsRepository,
+    default_settings_path,
+)
 from vim_key_trainer.services.sqlite_repository import SqliteResultRepository
 from vim_key_trainer.ui.branding import (
     APP_NAME,
@@ -32,7 +36,9 @@ def main() -> int:
     app.setStyle("Fusion")
     app.setStyleSheet(STYLESHEET)
     repository, warning = open_application_repository()
-    window = MainWindow(repository)
+    window = MainWindow(
+        repository, settings_repository=SettingsRepository(default_settings_path())
+    )
     if warning:
         window.show_storage_warning(warning)
     window.show()

@@ -214,6 +214,7 @@ class EditLoadReport:
 def validate_edit_replay(lesson: EditLesson) -> None:
     """전체 가이드 기대 상태와 동일 조건의 기준 풀이를 실행 검증한다."""
     engine = EditEngine(lesson.initial, allowed_commands=lesson.allowed_commands)
+    step_states = [engine.state]
     for step_index, step in enumerate(lesson.guide):
         for key_index, key in enumerate(step.keys):
             outcome = engine.submit(key)
@@ -227,6 +228,38 @@ def validate_edit_replay(lesson: EditLesson) -> None:
                 f"guide.{step_index}.expected",
                 "가이드 재생 상태가 기대 상태와 다릅니다.",
             )
+        step_states.append(engine.state)
+    covered = 0
+    seen: set[str] = set()
+    for index, segment in enumerate(lesson.segments):
+        if (
+            segment.id in seen
+            or segment.start_step != covered
+            or segment.end_step > len(lesson.guide)
+            or not set(segment.prerequisite_ids).issubset(seen)
+        ):
+            raise EditContentError(
+                f"segments.{index}", "구간 범위·순서·선행 조건이 다릅니다."
+            )
+        start = step_states[segment.start_step]
+        end = step_states[segment.end_step]
+        if any(
+            state.mode != "normal" or state.pending or state.command_line
+            for state in (start, end)
+        ):
+            raise EditContentError(
+                f"segments.{index}", "구간 경계는 Normal·대기 없음 상태여야 합니다."
+            )
+        if segment.target_end_row > max(len(start.lines), len(end.lines)):
+            raise EditContentError(
+                f"segments.{index}", "구간 대상이 수정 전후의 문서 범위를 벗어났습니다."
+            )
+        if lesson.free_enabled and start.lines == end.lines:
+            raise EditContentError(f"segments.{index}", "문서 수정이 없는 구간입니다.")
+        seen.add(segment.id)
+        covered = segment.end_step
+    if lesson.segments and covered != len(lesson.guide):
+        raise EditContentError("segments", "구간이 전체 가이드를 포함하지 않습니다.")
     if not goal_matches(lesson, engine.state):
         raise EditContentError(
             "guide", "전체 가이드가 Normal·대기 없음의 목표로 끝나지 않습니다."

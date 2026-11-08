@@ -66,6 +66,8 @@ class EditDocument(PracticeInput):
         self.change_spans: tuple[TextSpan, ...] = ()
         self._syntax_by_row: dict[int, list[TextSpan]] = {}
         self._changes_by_row: dict[int, list[TextSpan]] = {}
+        self.recovery_marks: tuple[tuple[int, str], ...] = ()
+        self.success_marks: tuple[tuple[int, str], ...] = ()
         self._layout_key: tuple[tuple[str, ...], int, int] | None = None
         if read_only:
             self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -80,6 +82,10 @@ class EditDocument(PracticeInput):
     @property
     def document_metrics(self) -> QFontMetricsF:
         return QFontMetricsF(self._document_font())
+
+    @property
+    def document_font(self) -> QFont:
+        return self._document_font()
 
     def show_state(self, state: EditorState) -> None:
         if state.lines != self.editor_state.lines:
@@ -133,6 +139,28 @@ class EditDocument(PracticeInput):
         self.change_spans = spans
         self._changes_by_row = _spans_by_row(spans)
         self.update()
+
+    def show_recovery_marks(self, marks: tuple[tuple[int, str], ...]) -> None:
+        """복구 표식은 차이 강조를 덮지 않고 줄 번호 옆 여백에 표시한다."""
+        if marks == self.recovery_marks:
+            return
+        self.recovery_marks = marks
+        self._update_mark_tooltip()
+        self.update()
+
+    def show_success_marks(self, marks: tuple[tuple[int, str], ...]) -> None:
+        if marks == self.success_marks:
+            return
+        self.success_marks = marks
+        self._update_mark_tooltip()
+        self.update()
+
+    def _update_mark_tooltip(self) -> None:
+        self.setToolTip(
+            "\n".join(f"◆ {row + 1}행 · {text}" for row, text in self.recovery_marks)
+            + ("\n" if self.recovery_marks and self.success_marks else "")
+            + "\n".join(f"✓ {row + 1}행 · {text}" for row, text in self.success_marks)
+        )
 
     def _span_rect(self, span: TextSpan, metrics: QFontMetricsF) -> QRectF:
         line = self.editor_state.lines[span.row]
@@ -289,6 +317,18 @@ class EditDocument(PracticeInput):
                 line,
             )
             self._paint_syntax(painter, row, metrics)
+            if any(mark_row == row for mark_row, _ in self.recovery_marks):
+                painter.setPen(QPen(QColor("#f3bc82"), 1.5))
+                painter.setBrush(QColor("#f3bc82"))
+                painter.drawEllipse(
+                    QRectF(49, y + metrics.lineSpacing() / 2 - 2.5, 5, 5)
+                )
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+            elif any(mark_row == row for mark_row, _ in self.success_marks):
+                painter.setPen(QPen(QColor("#a8dfb0"), 1.5))
+                middle = y + metrics.lineSpacing() / 2
+                painter.drawLine(48, round(middle), 51, round(middle + 3))
+                painter.drawLine(51, round(middle + 3), 56, round(middle - 3))
         if self.read_only:
             return
         cursor = self.cursor_rect
