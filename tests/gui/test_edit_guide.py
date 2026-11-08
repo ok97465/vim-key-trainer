@@ -1,5 +1,8 @@
 """반투명 가이드는 문서 위에서 진행만 표시하고 입력은 가로채지 않는다."""
 
+# Standard library imports
+from itertools import pairwise
+
 # Third party imports
 import pytest
 from PySide6.QtCore import QPoint, QRectF, Qt
@@ -126,6 +129,58 @@ def test_long_guide_keeps_entire_next_special_key_visible(qtbot: QtBot) -> None:
     comparison.resize(320, 220)
     qtbot.waitUntil(lambda: overlay.width() < 160)
     assert overlay.rect().contains(overlay.token_rect(120).toAlignedRect())
+
+
+def test_long_guide_previews_upcoming_keys_and_moves_in_chunks(qtbot: QtBot) -> None:
+    comparison = make_comparison(qtbot)
+    keys = (KeyToken("char", "x"),) * 160
+    overlay = comparison.guide_overlay
+    positions: list[float] = []
+    for completed in range(70):
+        comparison.show_guide(
+            keys, completed, description="긴 문자열 삽입", progress="1/2 단계"
+        )
+        command_rect, _ = overlay._content_rects()
+        # The real paint clip must fit several upcoming keys, not only the next key.
+        for index in range(completed, completed + 3):
+            assert command_rect.contains(overlay.token_rect(index))
+        positions.append(overlay.token_rect(0).left())
+
+    token_width = overlay.token_rect(0).width()
+    shifts = [
+        previous - current
+        for previous, current in pairwise(positions)
+        if current < previous
+    ]
+    assert shifts and min(shifts) > 2 * token_width
+    assert any(previous == current for previous, current in pairwise(positions[20:]))
+
+
+def test_long_guide_repositions_after_return_resize_and_new_step(qtbot: QtBot) -> None:
+    comparison = make_comparison(qtbot)
+    keys = (KeyToken("char", "x"),) * 160
+    comparison.show_guide(keys, 0, description="긴 문자열 삽입", progress="1/2 단계")
+    overlay = comparison.guide_overlay
+    initial = overlay.token_rect(0)
+
+    comparison.show_guide(keys, 80, description="긴 문자열 삽입", progress="1/2 단계")
+    assert overlay.token_rect(0).left() < initial.left()
+    comparison.show_guide(keys, 0, description="긴 문자열 삽입", progress="1/2 단계")
+    assert overlay.token_rect(0) == initial
+
+    comparison.show_guide(keys, 80, description="긴 문자열 삽입", progress="1/2 단계")
+    comparison.resize(640, 300)
+    qtbot.waitUntil(lambda: overlay.width() < 320)
+    command_rect, _ = overlay._content_rects()
+    for index in range(80, 83):
+        assert command_rect.contains(overlay.token_rect(index))
+
+    comparison.clear_guide()
+    new_keys = (KeyToken("char", "d"),) * 2
+    comparison.show_guide(new_keys, 0, description="줄 삭제", progress="2/2 단계")
+    command_rect, _ = overlay._content_rects()
+    assert command_rect.contains(overlay.token_rect(0))
+    assert command_rect.contains(overlay.token_rect(1))
 
 
 def test_guide_is_pinned_to_viewport_and_pause_does_not_destroy_progress(

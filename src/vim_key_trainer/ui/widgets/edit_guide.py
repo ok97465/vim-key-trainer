@@ -1,5 +1,8 @@
 """문서 위에서 입력 진행을 보여 주는 포커스 없는 반투명 가이드."""
 
+# Standard library imports
+from math import ceil
+
 # Third party imports
 from PySide6.QtCore import QEvent, QObject, QRectF, Qt
 from PySide6.QtGui import (
@@ -128,9 +131,14 @@ class EditGuideOverlay(QWidget):
         available = command_rect.width()
         active = min(self.completed, max(0, len(widths) - 1))
         before = sum(widths[:active])
-        # Keep some preceding input visible while fitting the entire next logical key.
-        offset = max(0.0, before + (widths[active] if widths else 0) - available)
-        x = command_rect.left() + max(0.0, (available - sum(widths)) / 2) - offset
+        active_right = before + (widths[active] if widths else 0)
+        total = sum(widths)
+        # Advance in chunks at 65%, leaving the active key near 25% and a preview.
+        chunk = available * 0.4
+        offset = ceil(max(0.0, active_right - available * 0.65) / chunk) * chunk
+        # Keep wide logical keys intact and avoid blank space past the final key.
+        offset = min(offset, before, max(0.0, total - available))
+        x = command_rect.left() + max(0.0, (available - total) / 2) - offset
         boxes: list[QRectF] = []
         for width in widths:
             boxes.append(QRectF(x, 0, width, self.height()))
