@@ -15,12 +15,18 @@ from vim_key_trainer.services.edit_session import EditingSession
 
 def test_guide_restores_a_damaged_copy_source_and_its_targets() -> None:
     source = next(item for item in load_code_sources() if item.source.language == "cpp")
-    source = replace(source, lines=("    limit = 40;",) * 500)
+    # 숫자 수정은 복사 원본·대상에만 가능하게 해 두 수정을 함께 선택한다.
+    # 나머지 행은 서로 달라 별도의 복사 후보가 생기지 않는다.
+    middle = tuple(
+        f"    return value_{chr(97 + index // 26)}{chr(97 + index % 26)};"
+        for index in range(498)
+    )
+    source = replace(source, lines=("    limit = 40;",) + middle + ("    limit = 40;",))
     weights = EditTechniqueWeights(
         **{name: int(name in {"numbers", "copy"}) for name, _ in EDIT_TECHNIQUES}
     )
     lesson = generate_edit_lesson(
-        EditPracticeSpec("code_cpp", 97, 500, weights), code_sources=(source,)
+        EditPracticeSpec("code_cpp", 0, 500, weights), code_sources=(source,)
     )
     assert lesson.initial.lines[0] == "    limit = 39;"
     assert lesson.goal_lines == source.lines

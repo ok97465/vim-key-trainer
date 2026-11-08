@@ -27,8 +27,8 @@ from vim_key_trainer.domain.editing import (
 )
 from vim_key_trainer.engine import SUPPORTED_COMMANDS, EditorState
 
-EDIT_GENERATOR_VERSION = 7
-CODE_SOURCE_SELECTION_VERSION = 6
+EDIT_GENERATOR_VERSION = 8
+CODE_SOURCE_SELECTION_VERSION = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +37,7 @@ class EditProfile:
     title: str
     description: str
     free_enabled: bool = True
-    content_version: int = 8
+    content_version: int = 9
     language: DocumentLanguage = "text"
     document_lengths: tuple[int, ...] = EDIT_DOCUMENT_LENGTHS
     default_document_lines: int = 24
@@ -83,7 +83,7 @@ _CODE_PROFILES = (
         "code_python",
         "Python Code 수정 연습",
         "들여쓰기·문자열·인자·리스트 객체와 검색·치환으로 Python 코드를 수정합니다.",
-        content_version=3,
+        content_version=4,
         language="python",
         document_lengths=CODE_DOCUMENT_LENGTHS["code_python"],
         default_document_lines=360,
@@ -92,7 +92,7 @@ _CODE_PROFILES = (
         "code_cpp",
         "C++ Code 수정 연습",
         "괄호짝·인자·문자열·구분자와 들여쓰기·검색·치환으로 C++ 코드를 수정합니다.",
-        content_version=3,
+        content_version=4,
         language="cpp",
         document_lengths=CODE_DOCUMENT_LENGTHS["code_cpp"],
         default_document_lines=360,
@@ -101,7 +101,7 @@ _CODE_PROFILES = (
         "code_json",
         "JSON 파일 수정 연습",
         "키·문자열·배열·객체와 숫자 설정·쉼표·들여쓰기를 수정합니다.",
-        content_version=2,
+        content_version=3,
         language="json",
         document_lengths=CODE_DOCUMENT_LENGTHS["code_json"],
         default_document_lines=60,
@@ -119,7 +119,7 @@ def edit_generator_version(
     if spec is not None and spec.code_source_id is not None:
         return CODE_SOURCE_SELECTION_VERSION
     if profile.id == "code_json":
-        return 3
+        return 4
     return (
         CODE_GENERATOR_VERSION if profile.language != "text" else EDIT_GENERATOR_VERSION
     )

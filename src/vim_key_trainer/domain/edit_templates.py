@@ -7,7 +7,7 @@
 # Standard library imports
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import gcd
 from random import Random
 
@@ -15,6 +15,11 @@ from random import Random
 from vim_key_trainer.domain.code_samples import CodeExcerpt
 from vim_key_trainer.domain.edit_weights import EditTechniqueWeights
 from vim_key_trainer.domain.keys import KeyToken
+from vim_key_trainer.domain.practice_words import (
+    PRACTICE_WORDS,
+    IdentifierPool,
+    practice_word,
+)
 
 ESC = KeyToken("special", "esc")
 ENTER = KeyToken("special", "enter")
@@ -112,12 +117,52 @@ _CONTEXTS = (
 )
 
 
-def _name(context: _Context, rng: Random, row: int) -> str:
-    return f"{rng.choice(context.names)}_{row + 1:02}"
+def _phrase(rng: Random, count: int = 2) -> str:
+    return " ".join(rng.sample(PRACTICE_WORDS, count))
 
 
-def _context_line(context: _Context, rng: Random, row: int) -> str:
-    name = _name(context, rng, row)
+def _name(context: _Context, rng: Random) -> str:
+    word = practice_word(rng)
+    return rng.choice((word, f"{rng.choice(context.names)}_{word}"))
+
+
+def _unique_search_word(lines: list[str], prefix: str, rng: Random) -> str:
+    """행 번호 표식 대신 문서의 다른 부분과 겹치지 않는 실제 단어를 고른다."""
+    document = "\n".join((*lines, prefix)).lower()
+    return practice_word(
+        rng, exclude=tuple(word for word in PRACTICE_WORDS if word in document)
+    )
+
+
+def _new_word(old: str, rng: Random) -> str:
+    return practice_word(
+        rng, exclude=tuple(word for word in PRACTICE_WORDS if old in word)
+    )
+
+
+def _path(rng: Random) -> str:
+    first, second, query = rng.sample(PRACTICE_WORDS, 3)
+    return f"{first}/{second}?{query}={rng.randrange(1, 10)}"
+
+
+def _replace_characters(
+    keys: tuple[KeyToken, ...], old: str, new: str
+) -> tuple[KeyToken, ...]:
+    before, after = characters(old), characters(new)
+    result: list[KeyToken] = []
+    index = 0
+    while index < len(keys):
+        if keys[index : index + len(before)] == before:
+            result.extend(after)
+            index += len(before)
+        else:
+            result.append(keys[index])
+            index += 1
+    return tuple(result)
+
+
+def _context_line(context: _Context, rng: Random) -> str:
+    name = _name(context, rng)
     value = rng.randrange(10, 900)
     status = rng.choice(context.states)
     layouts = (
@@ -126,25 +171,26 @@ def _context_line(context: _Context, rng: Random, row: int) -> str:
         f"{name} | {value} | {status}",
         f"check {name} limit {value} {status}",
     )
-    return layouts[row % len(layouts)]
+    return rng.choice(layouts)
 
 
 def _number_recipe(
     lines: list[str], row: int, variant: int, context: _Context, rng: Random
 ) -> EditRecipe:
-    name = _name(context, rng, row)
+    name = _name(context, rng)
     width = 1 + variant % 4
     old = str(rng.randrange(10 ** (width - 1), 10**width))
     new = str(rng.randrange(1, 10 ** (1 + rng.randrange(4))))
     if new == old:
         new = str(int(old) + 1)
+    field, unit, status = rng.sample(PRACTICE_WORDS, 3)
     formats = (
-        (f"{name} = ", " # verified"),
-        (f"  {context.prefix} {name} budget ", " units"),
-        (f"{name} | count=", " | ready"),
-        (f"set {name} retry=", ""),
+        (f"{name} = ", f" # {status}"),
+        (f"  {context.prefix} {name} {field} ", f" {unit}"),
+        (f"{name} | {field}=", f" | {status}"),
+        (f"set {name} {field}=", ""),
     )
-    prefix, suffix = formats[variant % len(formats)]
+    prefix, suffix = rng.choice(formats)
     if variant % 8 in {6, 7}:
         delta = rng.randrange(1, 10)
         increase = variant % 8 == 6
@@ -183,11 +229,10 @@ def _line_recipe(
     lines: list[str], row: int, variant: int, context: _Context, rng: Random
 ) -> EditRecipe:
     count = 2 if variant % 3 == 1 else 1
-    markers = ("obsolete", "duplicate", "debug", "retired")
     for offset in range(count):
         lines[row + offset] = (
-            f"{rng.choice(markers)} {context.prefix} "
-            f"{_name(context, rng, row + offset)} remove"
+            f"{practice_word(rng)} {context.prefix} "
+            f"{_name(context, rng)} {practice_word(rng)}"
         )
     command = f"d{count}d" if count > 1 and variant % 2 else counted(count, "dd")
     return EditRecipe(
@@ -207,20 +252,26 @@ def _line_recipe(
 def _word_recipe(
     lines: list[str], row: int, variant: int, context: _Context, rng: Random
 ) -> EditRecipe:
-    name = _name(context, rng, row)
+    name = _name(context, rng)
     variant %= _WORD_VARIANTS
     if variant >= 23:
-        return _delimited_object_recipe(lines, row, variant - 23, context, name)
+        return _delimited_object_recipe(lines, row, variant - 23, context, name, rng)
     if variant >= 14:
-        return _change_object_recipe(lines, row, variant - 14, context, name)
+        return _change_object_recipe(lines, row, variant - 14, context, name, rng)
     if variant >= 5:
-        return _extended_word_recipe(lines, row, variant, context, name)
+        return _extended_word_recipe(lines, row, variant, context, name, rng)
+    status = practice_word(rng)
     recipes = (
-        ("", "obsolete ", f"{name} ready", 1),
-        (f"route {name} ", "temporary legacy ", "active", 2),
-        (f"{context.prefix} ", "??? ", f"{name} verified", 1),
-        ("  ", "TODO REMOVE ", f"{name} checked", 2),
-        (f"check {name} ", "old stale draft unused ", "ready", 4),
+        ("", practice_word(rng) + " ", f"{name} {status}", 1),
+        (f"route {name} ", _phrase(rng) + " ", practice_word(rng), 2),
+        (
+            f"{context.prefix} ",
+            rng.choice(("??? ", "!!! ", "... ")),
+            f"{name} {status}",
+            1,
+        ),
+        ("  ", _phrase(rng).upper() + " ", f"{name} {status}", 2),
+        (f"check {name} ", _phrase(rng, 4) + " ", status, 4),
     )
     prefix, removed, suffix, count = recipes[variant % len(recipes)]
     if count == 4:
@@ -250,16 +301,16 @@ def _word_recipe(
 
 
 def _change_object_recipe(
-    lines: list[str], row: int, variant: int, context: _Context, name: str
+    lines: list[str], row: int, variant: int, context: _Context, name: str, rng: Random
 ) -> EditRecipe:
     """구분자 보존과 around 공백 규칙이 다른 수정 과제를 명시한다."""
     prefix = f"{context.prefix} {name} "
     if variant in {0, 1, 2, 8}:
-        old, new = (
-            ("obsolete", "stable") if variant != 1 else ("old/path?x=1", "prod/v2")
-        )
+        old, new = rng.sample(PRACTICE_WORDS, 2)
+        if variant == 1:
+            old, new = _path(rng), _path(rng)
         command = "bcw" if variant == 8 else ("ciw", "ciW", "cw")[variant]
-        suffix = " ready"
+        suffix = " " + practice_word(rng)
         column = len(prefix) + (0 if variant == 2 else 2)
     elif variant in {3, 4, 5}:
         left, right, command = (
@@ -268,10 +319,14 @@ def _change_object_recipe(
             ("[", "]", "ci]"),
         )[variant - 3]
         prefix += left
-        old, new, suffix = "draft value", "verified", right + " ready"
+        old = _phrase(rng)
+        new = _phrase(rng, rng.randrange(1, 4))
+        if new == old:
+            new = _new_word(old, rng)
+        suffix = right + " " + practice_word(rng)
         column = len(prefix) + 3
     else:
-        old, new, suffix = "obsolete ", "", "ready"
+        old, new, suffix = practice_word(rng) + " ", "", practice_word(rng)
         command = "daw" if variant == 6 else "daW"
         column = len(prefix) + 2
     lines[row] = prefix + old + suffix
@@ -298,13 +353,17 @@ def _change_object_recipe(
 
 
 def _delimited_object_recipe(
-    lines: list[str], row: int, variant: int, context: _Context, name: str
+    lines: list[str], row: int, variant: int, context: _Context, name: str, rng: Random
 ) -> EditRecipe:
     """구분자를 남기는 inner와 구분자까지 지우는 around를 모두 연습한다."""
     opening, closing, selector = _DELIMITED_OBJECTS[variant // 2]
     inner = variant % 2 == 0
     prefix = f"{context.prefix} {name} value="
-    old, new, suffix = "draft value", "verified", "; ready"
+    old = _phrase(rng, rng.randrange(1, 4))
+    new = _phrase(rng, rng.randrange(1, 4))
+    if new == old:
+        new = _new_word(old, rng)
+    suffix = "; " + practice_word(rng)
     lines[row] = prefix + opening + old + closing + suffix
     command = ("ci" if inner else "da") + selector
     keys = characters(command + (new if inner else "")) + ((ESC,) if inner else ())
@@ -329,14 +388,14 @@ def _delimited_object_recipe(
 
 
 def _extended_word_recipe(
-    lines: list[str], row: int, variant: int, context: _Context, name: str
+    lines: list[str], row: int, variant: int, context: _Context, name: str, rng: Random
 ) -> EditRecipe:
     if variant in {11, 12}:
-        prefix, old, new, suffix, command = (
-            (f"{name} state=", "readys", "ready", "; verified", "ex")
-            if variant == 11
-            else ("endpoint ", "prod/v2?", "prod/v2", " ready", "Ex")
-        )
+        new = practice_word(rng) if variant == 11 else _path(rng)
+        old = new + rng.choice("xyz") if variant == 11 else new + "?"
+        prefix = f"{name} state=" if variant == 11 else f"{name} "
+        suffix = ("; " if variant == 11 else " ") + practice_word(rng)
+        command = "ex" if variant == 11 else "Ex"
         lines[row] = prefix + old + suffix
         return EditRecipe(
             row,
@@ -354,8 +413,8 @@ def _extended_word_recipe(
     if variant == 13:
         prefix, old, new = (
             f"check endpoint for {name} use ",
-            "staging/v1?debug=yes",
-            "prod/v2",
+            _path(rng),
+            _path(rng),
         )
         lines[row] = prefix + old
         return EditRecipe(
@@ -376,8 +435,10 @@ def _extended_word_recipe(
             ),
         )
     if variant in {5, 6}:
-        removed = "old/path?debug=yes " if variant == 5 else "old/path legacy=value "
-        prefix, suffix = f"{context.prefix} ", f"{name} ready"
+        removed = _path(rng) + " "
+        if variant == 6:
+            removed += practice_word(rng) + "=" + practice_word(rng) + " "
+        prefix, suffix = f"{context.prefix} ", f"{name} {practice_word(rng)}"
         lines[row] = prefix + removed + suffix
         command = "dW" if variant == 5 else "d2W"
         return EditRecipe(
@@ -393,14 +454,15 @@ def _extended_word_recipe(
             ),
         )
     if variant in {7, 9}:
-        prefix, old, new, suffix = f"{name} state=", "obsolete", "stable", "; ready"
+        old, new = rng.sample(PRACTICE_WORDS, 2)
+        prefix, suffix = f"{name} state=", "; " + practice_word(rng)
         command = "diw" if variant == 7 else "de"
     else:
         prefix, old, new, suffix = (
-            "endpoint ",
-            "staging/v1?debug=yes",
-            "prod/v2",
-            " ready",
+            f"{name} ",
+            _path(rng),
+            _path(rng),
+            " " + practice_word(rng),
         )
         command = "diW" if variant == 8 else "dE"
     lines[row] = prefix + old + suffix
@@ -443,7 +505,7 @@ def _append_recipe(
                 ),
             ),
         )
-    owner = rng.choice(("alice", "bob", "cora", "dana", "erin"))
+    owner = practice_word(rng)
     additions = (
         f" # owner={owner}",
         f" ; checked={rng.randrange(10, 99)}",
@@ -452,7 +514,7 @@ def _append_recipe(
     )
     replacement: tuple[str, ...]
     if variant % 8 in {4, 5, 6}:
-        note = f"# {owner}: verify {_name(context, rng, row)}"
+        note = f"# {owner}: {practice_word(rng)} {_name(context, rng)}"
         command = "O" if variant % 8 == 5 else "o"
         replacement = (note, lines[row]) if command == "O" else (lines[row], note)
         keys = characters(command + note) + (ESC,)
@@ -465,7 +527,7 @@ def _append_recipe(
         keys = characters("yyp")
         text = f"{row + 1}행을 yy로 복사하고 p로 아래에 같은 줄을 추가합니다."
     elif variant % 8 == 3:
-        note = f"# {owner}: verify {_name(context, rng, row)}"
+        note = f"# {owner}: {practice_word(rng)} {_name(context, rng)}"
         replacement = (lines[row], note)
         keys = characters("A") + (ENTER,) + characters(note) + (ESC,)
         text = f"{row + 1}행 끝에서 Enter로 새 메모 줄을 추가합니다."
@@ -481,15 +543,16 @@ def _structure_recipe(
     lines: list[str], row: int, variant: int, context: _Context, rng: Random
 ) -> EditRecipe:
     """한 구간 안에서만 줄·공백·문자 상태를 바꾸는 복합 기술."""
-    name = _name(context, rng, row)
+    name = _name(context, rng)
+    status = practice_word(rng)
     variant %= _STRUCTURE_VARIANTS
     if variant == 0:
         lines[row] = f"{context.prefix} {name}"
-        lines[row + 1] = "    ready"
+        lines[row + 1] = "    " + status
         return EditRecipe(
             row,
             2,
-            (lines[row] + " ready",),
+            (lines[row] + " " + status,),
             (
                 RecipeAction(
                     None, characters("J"), "J로 두 줄 사이 공백을 정리하며 합칩니다."
@@ -497,7 +560,7 @@ def _structure_recipe(
             ),
         )
     if variant in {1, 2}:
-        line = f"{name} = ready"
+        line = f"{name} = {status}"
         lines[row] = line if variant == 1 else "    " + line
         goal = "    " + line if variant == 1 else line
         command = ">>" if variant == 1 else "<<"
@@ -513,37 +576,39 @@ def _structure_recipe(
             ),
         )
     if variant == 3:
-        lines[row] = f"{name}=x; ready"
+        old, new = rng.sample("123456789", 2)
+        delimiter = rng.choice("=:")
+        lines[row] = f"{name}{delimiter}{old}; {status}"
         return EditRecipe(
             row,
             1,
-            (f"{name}=9; ready",),
+            (f"{name}{delimiter}{new}; {status}",),
             (
                 RecipeAction(
                     0,
-                    characters("f=lr9"),
-                    "f=로 구분자를 찾고 l·r9로 잘못된 값을 교체합니다.",
+                    characters(f"f{delimiter}lr{new}"),
+                    f"f{delimiter}로 구분자를 찾고 l·r{new}로 값을 교체합니다.",
                 ),
             ),
         )
     if variant == 4:
         prefix = f"{context.prefix} {name} "
-        lines[row] = prefix + "draft pending"
+        lines[row] = prefix + _phrase(rng, rng.randrange(1, 4))
         return EditRecipe(
             row,
             1,
-            (prefix + "ready",),
+            (prefix + status,),
             (
                 RecipeAction(
                     len(prefix),
-                    characters("Cready") + (ESC,),
+                    characters("C" + status) + (ESC,),
                     "C로 줄 끝의 상태를 한 번에 변경하고 Esc로 마칩니다.",
                 ),
             ),
         )
     if variant == 5:
-        prefix = f"{context.prefix} {name} ready"
-        lines[row] = prefix + " # debug only"
+        prefix = f"{context.prefix} {name} {status}"
+        lines[row] = prefix + " # " + _phrase(rng)
         return EditRecipe(
             row,
             1,
@@ -579,17 +644,17 @@ def _structure_recipe(
         )
     if variant == 8:
         prefix = f"{context.prefix} {name} "
-        lines[row] = prefix + "obsolete"
-        lines[row + 1] = prefix + "pending"
+        lines[row] = prefix + _new_word(status, rng)
+        lines[row + 1] = prefix + _new_word(status, rng)
         return EditRecipe(
             row,
             2,
-            (prefix + "ready", prefix + "ready"),
+            (prefix + status, prefix + status),
             (
                 RecipeAction(
                     len(prefix),
-                    characters("ciwready") + (ESC,),
-                    "첫 상태를 ciw로 ready로 변경합니다.",
+                    characters("ciw" + status) + (ESC,),
+                    f"첫 상태를 ciw로 {status!r}로 변경합니다.",
                 ),
                 RecipeAction(
                     None,
@@ -600,11 +665,11 @@ def _structure_recipe(
         )
     if variant == 9:
         prefix = f"{context.prefix} {name} "
-        lines[row] = prefix + "ready"
+        lines[row] = prefix + status
         return EditRecipe(
             row,
             1,
-            (prefix + "READY",),
+            (prefix + status.upper(),),
             (
                 RecipeAction(
                     len(prefix),
@@ -615,12 +680,15 @@ def _structure_recipe(
         )
     if variant == 23:
         prefix = f"{context.prefix} {name} "
-        lines[row] = prefix + "obsolete; pending"
-        keys = characters("ciwready") + (ESC,) + characters("f;w.")
+        first, second = rng.sample(
+            tuple(word for word in PRACTICE_WORDS if word != status), 2
+        )
+        lines[row] = prefix + first + "; " + second
+        keys = characters("ciw" + status) + (ESC,) + characters("f;w.")
         return EditRecipe(
             row,
             1,
-            (prefix + "ready; ready",),
+            (prefix + status + "; " + status,),
             (
                 RecipeAction(
                     len(prefix),
@@ -630,7 +698,7 @@ def _structure_recipe(
             ),
         )
     if variant == 24:
-        lines[row] = f"{context.prefix} {name} ready"
+        lines[row] = f"{context.prefix} {name} {status}"
         return EditRecipe(
             row,
             1,
@@ -642,72 +710,81 @@ def _structure_recipe(
             ),
         )
     if variant == 25:
-        lines[row] = f"old {name} ready"
-        lines[row + 1] = f"old {name} checked"
+        marker = rng.choice(tuple(word for word in PRACTICE_WORDS if len(word) == 3))
+        lines[row] = f"{marker} {name} {status}"
+        lines[row + 1] = f"{marker} {name} {practice_word(rng)}"
         return EditRecipe(
             row,
             2,
             (
-                lines[row].replace("old", "OLD", 1),
-                lines[row + 1].replace("old", "OLD", 1),
+                lines[row].replace(marker, marker.upper(), 1),
+                lines[row + 1].replace(marker, marker.upper(), 1),
             ),
             (
                 RecipeAction(
                     0,
                     (KeyToken("chord", "ctrl+v"),) + characters("j2lU"),
-                    "실제 Control+V로 두 행의 old 열만 선택하고 U로 대문자로 바꿉니다.",
+                    f"실제 Control+V로 두 행의 {marker!r} 열만 선택하고 "
+                    "U로 대문자로 바꿉니다.",
                 ),
             ),
         )
     if variant == 26:
         prefix = f"{context.prefix} {name}. "
-        lines[row] = prefix + "Old sentence. Keep this sentence."
+        old, new, kept = (
+            _phrase(rng, rng.randrange(2, 5)).capitalize() + "." for _ in range(3)
+        )
+        lines[row] = prefix + old + " " + kept
         return EditRecipe(
             row,
             1,
-            (prefix + "Verified sentence. Keep this sentence.",),
+            (prefix + new + " " + kept,),
             (
                 RecipeAction(
                     len(prefix),
-                    characters("cisVerified sentence.") + (ESC,),
+                    characters("cis" + new) + (ESC,),
                     "cis로 첫 문장 전체를 바꾸고 다음 문장은 남깁니다.",
                 ),
             ),
         )
     if variant == 27:
-        lines[row : row + 3] = ("", f"Old paragraph for {name}.", "")
+        old = _phrase(rng, rng.randrange(3, 6)).capitalize() + "."
+        new = _phrase(rng, rng.randrange(3, 6)).capitalize() + "."
+        lines[row : row + 3] = ("", old, "")
         return EditRecipe(
             row,
             3,
-            ("", "Verified paragraph.", ""),
+            ("", new, ""),
             (
                 RecipeAction(
                     0,
-                    characters("jcipVerified paragraph.") + (ESC,),
+                    characters("jcip" + new) + (ESC,),
                     "빈 줄로 나뉜 문단으로 이동해 cip로 내용만 바꿉니다.",
                 ),
             ),
         )
     if variant in {10, 11, 13, 14, 15, 16, 17, 18}:
         prefix = f"{context.prefix} {name} "
-        old = f"broken_{row}_tag"
+        old = _unique_search_word(lines, prefix, rng)
+        new = _new_word(old, rng)
         lines[row] = prefix + old
         if variant == 10:
-            keys = characters("0/" + old) + (ENTER,) + characters("ciwready") + (ESC,)
-            text = "고유한 오류 표식을 /로 검색하고 Enter 확정 후 ciw로 고칩니다."
+            keys = characters("0/" + old) + (ENTER,) + characters("ciw" + new) + (ESC,)
+            text = "잘못된 단어를 /로 검색하고 Enter 확정 후 ciw로 고칩니다."
         elif variant == 11:
-            keys = characters(f":s/{old}/ready/") + (ENTER,)
-            text = "현재 줄의 오류 표식을 :s 치환으로 고치고 Enter로 확정합니다."
+            keys = characters(f":s/{old}/{new}/") + (ENTER,)
+            text = "현재 줄의 잘못된 단어를 :s 치환으로 고치고 Enter로 확정합니다."
         elif variant == 13:
-            lines[row] += " verified"
-            keys = characters("$?" + old) + (ENTER,) + characters("ciwready") + (ESC,)
-            text = "줄 끝에서 ?로 오류 표식을 뒤로 검색하고 ciw로 고칩니다."
+            suffix = " " + _new_word(old, rng)
+            lines[row] += suffix
+            keys = characters("$?" + old) + (ENTER,) + characters("ciw" + new) + (ESC,)
+            text = "줄 끝에서 ?로 잘못된 단어를 뒤로 검색하고 ciw로 고칩니다."
         elif variant == 14:
             lines[row] += " " + old
             keys = (
                 characters("0/" + old)
                 + (ENTER,)
-                + characters("nciwready")
+                + characters("nciw" + new)
                 + (ESC,)
                 + characters("N.")
             )
@@ -715,23 +792,22 @@ def _structure_recipe(
         elif variant in {15, 18}:
             lines[row] += " " + old
             search = "*" if variant == 15 else "#"
-            keys = characters(search + "ciwready") + (ESC,) + characters("N.")
+            keys = characters(search + "ciw" + new) + (ESC,) + characters("N.")
             text = f"{search}로 같은 단어를 찾아 고치고 N·.으로 다른 표식도 고칩니다."
         else:
             lines[row] += " " + old
             flags = "g" if variant == 16 else "gi"
             if variant == 17:
                 lines[row] = prefix + old.upper() + " " + old
-            keys = characters(f":s/{old}/ready/{flags}") + (ENTER,)
+            keys = characters(f":s/{old}/{new}/{flags}") + (ENTER,)
             text = (
                 ":s의 g로 현재 줄의 모든 표식을 치환합니다."
                 if variant == 16
                 else ":s의 gi로 대소문자를 구분하지 않고 모든 표식을 치환합니다."
             )
-        suffix = " verified" if variant == 13 else ""
-        replacement = prefix + "ready" + suffix
+        replacement = prefix + new + (suffix if variant == 13 else "")
         if variant in {14, 15, 16, 17, 18}:
-            replacement += " ready"
+            replacement += " " + new
         column = len(prefix) if variant == 15 else 0
         if variant == 18:
             column = len(prefix) + len(old) + 1
@@ -742,16 +818,17 @@ def _structure_recipe(
             (RecipeAction(column, keys, text),),
         )
     if variant == 12:
-        prefix = f"{name} (draft (value) tag) "
-        lines[row] = prefix + "obsolete"
+        first, second, third = rng.sample(PRACTICE_WORDS, 3)
+        prefix = f"{name} ({first} ({second}) {third}) "
+        lines[row] = prefix + _new_word(status, rng)
         return EditRecipe(
             row,
             1,
-            (prefix + "ready",),
+            (prefix + status,),
             (
                 RecipeAction(
                     0,
-                    characters("f(%wciwready") + (ESC,),
+                    characters("f(%wciw" + status) + (ESC,),
                     "f(로 여는 괄호를 찾고 %로 중첩된 괄호짝을 넘어 상태를 고칩니다.",
                 ),
             ),
@@ -759,7 +836,7 @@ def _structure_recipe(
     if variant == 19:
         old_values = rng.sample("123456789", 3)
         new_values = old_values[1:] + old_values[:1]
-        fields = ("limit", "retry", "delay")
+        fields = tuple(rng.sample(PRACTICE_WORDS, 3))
         prefix = f"{name} "
         lines[row] = prefix + "; ".join(
             f"{field}={value}" for field, value in zip(fields, old_values, strict=True)
@@ -782,22 +859,22 @@ def _structure_recipe(
         return EditRecipe(row, 1, (goal,), actions)
     # 남은 세 유형은 단어 수가 달라도 같은 구분자로 수정 범위를 정한다.
     prefix = f"{name} state="
-    status = rng.choice(("draft", "needs review", "waiting for approval"))
-    suffix = "; owner=team"
-    lines[row] = prefix + status + suffix
+    phrase = _phrase(rng, rng.randrange(1, 4))
+    suffix = "; owner=" + practice_word(rng)
+    lines[row] = prefix + phrase + suffix
     if variant == 22:
         keys = characters("vt;U")
-        replacement = prefix + status.upper() + suffix
+        replacement = prefix + phrase.upper() + suffix
         text = "v·t;로 세미콜론 앞의 상태만 선택하고 U로 대문자로 바꿉니다."
     else:
         command = "ct;" if variant == 20 else "cf;"
         separator = ";" if variant == 20 else ","
-        keys = characters(command + "ready" + ("," if variant == 21 else "")) + (ESC,)
-        replacement = prefix + "ready" + separator + " owner=team"
+        keys = characters(command + status + ("," if variant == 21 else "")) + (ESC,)
+        replacement = prefix + status + separator + suffix[1:]
         text = (
-            "ct;로 세미콜론을 남기고 상태 문구만 ready로 바꿉니다."
+            f"ct;로 세미콜론을 남기고 상태 문구만 {status!r}로 바꿉니다."
             if variant == 20
-            else "cf;로 세미콜론까지 바꾸어 상태를 ready,로 정리합니다."
+            else f"cf;로 세미콜론까지 바꾸어 상태를 {status + ','!r}로 정리합니다."
         )
     return EditRecipe(row, 1, (replacement,), (RecipeAction(len(prefix), keys, text),))
 
@@ -813,7 +890,7 @@ def _undo_recipe(
         edit = characters("dw")
         text = "첫 단어를 삭제"
     elif variant % 4 == 2:
-        edit = characters("A # trial") + (ESC,)
+        edit = characters("A # " + _phrase(rng)) + (ESC,)
         text = "시험 메모를 추가"
     else:
         edit = characters("dd")
@@ -1015,8 +1092,9 @@ def build_document_plan(
 ) -> DocumentPlan:
     """최소 7곳을 고치고 긴 문서는 수정량도 늘어나는 문서를 만든다."""
     context = rng.choice(_CONTEXTS)
-    lines = [_context_line(context, rng, row) for row in range(line_count)]
+    lines = [_context_line(context, rng) for _ in range(line_count)]
     recipes: list[EditRecipe] = []
+    search_terms: dict[int, str] = {}
     repair_count = max(7, line_count // 4)
     for index, (factory, recipe_variant) in enumerate(
         _recipe_schedule(profile_id, repair_count, rng, weights)
@@ -1047,7 +1125,47 @@ def build_document_plan(
                     recipe_variant = 8
                 elif recipe_variant in {3, 4, 5, 6}:
                     recipe_variant = 0
-        recipes.append(factory(lines, row, recipe_variant, context, rng))
+        recipe = factory(lines, row, recipe_variant, context, rng)
+        if factory is _structure_recipe and recipe_variant in {
+            10,
+            11,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+        }:
+            search_terms[len(recipes)] = lines[row].split()[2].lower()
+        recipes.append(recipe)
+    # 다른 수정의 원문과 목표까지 모두 만든 뒤 검색어를 배정한다. 나중에 만든
+    # 이름이나 복원 결과가 먼저 배정한 검색어와 겹치는 일도 방지한다.
+    pool = IdentifierPool(
+        rng,
+        tuple(lines) + tuple(line for recipe in recipes for line in recipe.replacement),
+    )
+    for index, old in search_terms.items():
+        recipe = recipes[index]
+        new = pool.take()
+        original = lines[recipe.row]
+        lines[recipe.row] = original.replace(old, new).replace(old.upper(), new.upper())
+        recipes[index] = replace(
+            recipe,
+            actions=tuple(
+                replace(
+                    action,
+                    column=(
+                        action.column
+                        + original[: action.column].lower().count(old)
+                        * (len(new) - len(old))
+                        if action.column is not None
+                        else None
+                    ),
+                    keys=_replace_characters(action.keys, old, new),
+                )
+                for action in recipe.actions
+            ),
+        )
     initial = tuple(lines)
     goal = list(initial)
     # 뒤에서부터 적용하면 줄 삭제·추가 이후에도 앞쪽의 원본 좌표가 유지된다.

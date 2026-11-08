@@ -10,6 +10,7 @@ from collections import Counter
 from dataclasses import dataclass
 from math import gcd
 from random import Random
+from string import ascii_letters, digits
 from typing import Literal
 
 # Local imports
@@ -27,9 +28,10 @@ from vim_key_trainer.domain.edit_templates import ESC, characters, counted
 from vim_key_trainer.domain.edit_weights import EditTechniqueWeights
 from vim_key_trainer.domain.editing import EditLesson
 from vim_key_trainer.domain.keys import KeyToken
+from vim_key_trainer.domain.practice_words import PRACTICE_WORDS, practice_word
 from vim_key_trainer.engine import SUPPORTED_COMMANDS, EditEngine, EditorState
 
-DOCUMENT_GENERATOR_VERSION = 8
+DOCUMENT_GENERATOR_VERSION = 9
 CorruptionKind = Literal[
     "insert",
     "prefix",
@@ -69,7 +71,7 @@ _DAMAGE_TECHNIQUES = {
     "indent": "structure",
     "substitution": "substitution",
 }
-_WORDS = ("temp", "draft", "cache", "trace", "extra", "local", "debug", "old")
+_SHORT_WORDS = tuple(word for word in PRACTICE_WORDS if len(word) <= 8)
 _WORD = re.compile(r"[A-Za-z_][A-Za-z_0-9]*")
 _BLOCKS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("(", ")", ("b", ")", "(")),
@@ -118,8 +120,31 @@ class _Repair:
 
 
 def _fragment(rng: Random) -> str:
-    word = rng.choice(_WORDS)
-    return rng.choice((f"_{word}", f" {word} ", str(rng.randrange(1, 100)), "??"))
+    word = rng.choice(_SHORT_WORDS)
+    variant = rng.randrange(6)
+    if variant == 0:
+        return word
+    if variant == 1:
+        return f"_{word}"
+    if variant == 2:
+        return f" {word} "
+    if variant == 3:
+        return str(rng.randrange(1, 10000))
+    if variant == 4:
+        return "".join(rng.choices("!?#+=", k=rng.randrange(1, 4)))
+    return " ".join(rng.sample(tuple(w for w in _SHORT_WORDS if len(w) <= 4), 2))
+
+
+def _word_pattern(line: str, word: str) -> str:
+    """부분 단어도 함께 바뀔 때만 Vim 단어 경계를 요구한다."""
+    for match in re.finditer(re.escape(word), line):
+        left = line[match.start() - 1] if match.start() else ""
+        right = line[match.end() : match.end() + 1]
+        if (left and (left.isalnum() or left == "_")) or (
+            right and (right.isalnum() or right == "_")
+        ):
+            return r"\<" + word + r"\>"
+    return word
 
 
 def _row_regions(lines: tuple[str, ...], count: int) -> list[tuple[int, ...]]:
@@ -195,7 +220,7 @@ def _damage(line: str, kind: CorruptionKind, rng: Random) -> _Damage:
         column = rng.choice([match.start() for match in _WORD.finditer(line)] or [0])
         return _Damage(
             column,
-            characters("i" + opening + rng.choice(_WORDS) + closing) + (ESC,),
+            characters("i" + opening + rng.choice(_SHORT_WORDS) + closing) + (ESC,),
             kind,
         )
     if kind == "block":
@@ -207,9 +232,7 @@ def _damage(line: str, kind: CorruptionKind, rng: Random) -> _Damage:
         ]
         if block_ranges:
             left, right, selectors = rng.choice(block_ranges)
-            replacement = rng.choice(_WORDS)
-            if replacement == line[left + 1 : right]:
-                replacement = "draft" if replacement != "draft" else "temp"
+            replacement = practice_word(rng, exclude=(line[left + 1 : right],))
             return _Damage(
                 left,
                 characters("ci" + rng.choice(selectors) + replacement) + (ESC,),
@@ -235,9 +258,7 @@ def _damage(line: str, kind: CorruptionKind, rng: Random) -> _Damage:
         ]
         if ranges:
             start, end, quote = rng.choice(ranges)
-            replacement = rng.choice(_WORDS)
-            if replacement == line[start:end]:
-                replacement = "draft" if replacement != "draft" else "temp"
+            replacement = practice_word(rng, exclude=(line[start:end],))
             return _Damage(
                 start,
                 characters("ci" + quote + replacement) + (ESC,),
@@ -253,20 +274,16 @@ def _damage(line: str, kind: CorruptionKind, rng: Random) -> _Damage:
         ]
         if repeated:
             word = rng.choice(repeated)
-            replacements = (
-                (fragment * 2)[: len(word)]
-                for fragment in ("draft", "trace", "local", "cache", "temp")
-            )
-            replacement_word = next(
-                (
-                    candidate
-                    for candidate in replacements
-                    if candidate not in frequencies
-                ),
-                None,
-            )
-            if replacement_word is not None:
-                pattern = r"\<" + word + r"\>"
+            # 세 번 바꾸어도 총 글자 수 변화가 12 이내인 자연 단어를 쓴다.
+            replacements = [
+                candidate
+                for candidate in PRACTICE_WORDS
+                if candidate not in line
+                and abs(len(candidate) - len(word)) * frequencies[word] <= 12
+            ]
+            if replacements:
+                replacement_word = rng.choice(replacements)
+                pattern = _word_pattern(line, word)
                 return _Damage(
                     None,
                     characters(f":s/{pattern}/{replacement_word}/g")
@@ -278,18 +295,16 @@ def _damage(line: str, kind: CorruptionKind, rng: Random) -> _Damage:
         words = [match for match in _WORD.finditer(line) if len(match.group()) <= 10]
         if words:
             match = rng.choice(words)
-            replacement = rng.choice(_WORDS)
-            if replacement == match.group():
-                replacement = "draft" if replacement != "draft" else "temp"
+            replacement = practice_word(rng, exclude=(match.group(),))
             return _Damage(
                 match.start(), characters("ciw" + replacement) + (ESC,), kind
             )
         kind = "replace_char"
     if kind == "replace_char":
         column = rng.randrange(len(line))
-        character = rng.choice("!?_xyz012")
-        if character == line[column]:
-            character = "?" if character != "?" else "!"
+        character = rng.choice(
+            (ascii_letters + digits + "_!?.,:;+-=").replace(line[column], "")
+        )
         return _Damage(column, characters("r" + character), kind)
     if kind == "word":
         word_damage = _word_damage(line, rng)
@@ -444,7 +459,7 @@ def _substitution_repairs(
             }
         )
         for before, after in changed_words:
-            pattern = r"\<" + after + r"\>"
+            pattern = _word_pattern(operation.after, after)
             keys = characters(f":s/{pattern}/{before}/g") + (
                 KeyToken("special", "enter"),
             )
@@ -921,7 +936,7 @@ def generate_document_problem(
         goal_cursor=None,
         allowed_commands=SUPPORTED_COMMANDS,
         guide=tuple(guide.steps),
-        baseline_version=7,
+        baseline_version=8,
         baseline=baseline,
         baseline_keys=len(baseline),
         generator_version=DOCUMENT_GENERATOR_VERSION,

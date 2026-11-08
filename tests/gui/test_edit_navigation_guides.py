@@ -13,12 +13,17 @@ from pytestqt.qtbot import QtBot
 
 # Local imports
 from vim_key_trainer.content.edit_loader import get_edit_lesson
+from vim_key_trainer.domain.document_missions import DocumentPracticeSpec
 from vim_key_trainer.domain.edit_builder import GuideBuilder
+from vim_key_trainer.domain.edit_generator import generate_edit_lesson
 from vim_key_trainer.domain.edit_templates import characters
 from vim_key_trainer.domain.editing import EditPracticeSpec
 from vim_key_trainer.domain.keys import KeyToken
 from vim_key_trainer.domain.sessions import SessionState
-from vim_key_trainer.engine import SUPPORTED_COMMANDS, EditorState
+from vim_key_trainer.engine import SUPPORTED_COMMANDS, EditEngine, EditorState
+from vim_key_trainer.services.document_problem_factory import (
+    create_random_document_problem,
+)
 from vim_key_trainer.ui.main_window import MainWindow
 from vim_key_trainer.ui.qt_input import NormalizedKey
 
@@ -120,17 +125,47 @@ def test_document_guides_cover_pair_search_and_substitution_across_problems(
     qtbot: QtBot,
     real_document: bool,
 ) -> None:
+    expected_features = {"pair", "substitution"}
+    if not real_document:
+        expected_features.add("search")
+    covered: set[str] = set()
+    cases: list[tuple[str, int]] = []
+    lesson_ids = (
+        ("mission_fmt_cpp", "mission_attrs") if real_document else ("editing_compound",)
+    )
+    for seed in range(48):
+        for lesson_id in lesson_ids:
+            lesson = (
+                create_random_document_problem(DocumentPracticeSpec(lesson_id, seed))
+                if real_document
+                else generate_edit_lesson(EditPracticeSpec(lesson_id, seed))
+            )
+            engine = EditEngine(lesson.initial, lesson.allowed_commands)
+            available: set[str] = set()
+            for key in lesson.baseline:
+                before = engine.state
+                outcome = engine.submit(key)
+                assert outcome.accepted
+                if outcome.command == "%":
+                    available.add("pair")
+                elif outcome.command in {"/", "?"}:
+                    available.add("search")
+                elif outcome.command == ":" and before.command_line.startswith(":s"):
+                    available.add("substitution")
+            if available & (expected_features - covered):
+                cases.append((lesson_id, seed))
+                covered.update(available)
+            if expected_features <= covered:
+                break
+        if expected_features <= covered:
+            break
+    assert expected_features <= covered
     window = MainWindow()
     qtbot.addWidget(window)
     window.show()
     window.activateWindow()
     qtbot.waitUntil(window.isActiveWindow)
     features: set[str] = set()
-    cases = (
-        (("mission_fmt_cpp", 0), ("mission_attrs", 1))
-        if real_document
-        else tuple(("editing_compound", seed) for seed in (3, 25, 32))
-    )
     for lesson_id, seed in cases:
         if real_document:
             window.prepare_document_mission(lesson_id, seed=seed)
@@ -139,28 +174,29 @@ def test_document_guides_cover_pair_search_and_substitution_across_problems(
         features.update(play_guide(window, qtbot))
 
     # 기술은 여러 과제에서 고루 연습한다. 한 과제에 모두 들어갈 필요는 없다.
-    expected_features = {"pair", "substitution"}
-    if not real_document:
-        expected_features.add("search")
     assert expected_features <= features
 
 
-@pytest.mark.parametrize(
-    ("seed", "command"), [(3, "bcw"), (2, "ciw"), (12, "cib"), (8, "da]")]
-)
+@pytest.mark.parametrize("command", ["bcw", "ciw", "cib", "da]"])
 def test_word_and_block_object_guides_complete_through_qt_keys(
-    qtbot: QtBot, seed: int, command: str
+    qtbot: QtBot, command: str
 ) -> None:
+    keys = characters(command)
+    for seed in range(48):
+        spec = EditPracticeSpec("editing_delete_word", seed, 40)
+        lesson = generate_edit_lesson(spec)
+        if any(step.keys[: len(keys)] == keys for step in lesson.guide):
+            break
+    else:
+        pytest.fail(f"{command} 명령을 포함한 생성 과제가 없습니다.")
     window = MainWindow()
     qtbot.addWidget(window)
     window.show()
     window.activateWindow()
     qtbot.waitUntil(window.isActiveWindow)
-    spec = EditPracticeSpec("editing_delete_word", seed, 40)
     window.prepare_editing(spec.profile_id, spec)
     session = window.edit_practice.session
     assert session is not None
-    keys = characters(command)
     assert any(step.keys[: len(keys)] == keys for step in session.lesson.guide)
     play_guide(window, qtbot)
 

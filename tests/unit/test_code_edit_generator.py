@@ -2,6 +2,7 @@
 
 # Standard library imports
 import json
+import re
 from dataclasses import replace
 from random import Random
 
@@ -10,14 +11,22 @@ import pytest
 
 # Local imports
 from vim_key_trainer.content.code_corpus import load_code_sources
-from vim_key_trainer.domain.code_edit_templates import build_code_document_plan
+from vim_key_trainer.domain.code_edit_templates import (
+    CODE_GENERATOR_VERSION,
+    build_code_document_plan,
+)
 from vim_key_trainer.domain.edit_generator import (
+    CODE_SOURCE_SELECTION_VERSION,
     generate_edit_lesson,
     get_edit_profile,
     list_code_edit_profiles,
 )
 from vim_key_trainer.domain.edit_weights import EDIT_TECHNIQUES, EditTechniqueWeights
-from vim_key_trainer.domain.editing import EditPracticeSpec, random_edit_document_lines
+from vim_key_trainer.domain.editing import (
+    EditPracticeSpec,
+    expected_states_match,
+    random_edit_document_lines,
+)
 from vim_key_trainer.domain.sessions import InputResult, SessionState
 from vim_key_trainer.engine import EditEngine
 from vim_key_trainer.services.edit_problem_factory import create_edit_problem
@@ -119,6 +128,109 @@ def test_single_technique_weight_still_produces_replayable_code(
     )
 
 
+@pytest.mark.parametrize(
+    "profile_id,line_count",
+    [("code_python", 300), ("code_cpp", 300), ("code_json", 60)],
+)
+def test_search_repairs_use_varied_unambiguous_words_and_replay_both_modes(
+    profile_id: str, line_count: int
+) -> None:
+    weights = EditTechniqueWeights(
+        **{name: int(name == "search") for name, _ in EDIT_TECHNIQUES}
+    )
+    sources = load_code_sources()
+    markers: set[str] = set()
+    directions: set[str] = set()
+    full_or_partial: set[bool] = set()
+    for seed in range(8):
+        spec = EditPracticeSpec(profile_id, seed, line_count, weights)
+        lesson = generate_edit_lesson(spec, code_sources=sources)
+        if seed == 0:
+            assert lesson == generate_edit_lesson(spec, code_sources=sources)
+        guided = EditingSession(lesson, "guided", clock_ns=lambda: 0)
+        for step in lesson.guide:
+            is_search = step.keys[0].value in {"/", "?"}
+            if is_search:
+                directions.add(step.keys[0].value)
+            for key in step.keys:
+                before = guided.engine.state
+                confirms_search = (
+                    is_search and before.command_line and key.value == "enter"
+                )
+                assert guided.submit(key) == InputResult.ACCEPTED
+                if confirms_search:
+                    state = guided.engine.state
+                    pattern = before.command_line[1:]
+                    assert re.fullmatch(r"[A-Za-z_]{3,}", pattern)
+                    assert state.row == step.expected.row
+                    assert state.lines[state.row].startswith(pattern, state.column)
+                    assert (
+                        sum(
+                            len(re.findall(r"(?=" + re.escape(pattern) + r")", line))
+                            for line in before.lines
+                        )
+                        == 1
+                    )
+                    marker = next(
+                        match.group()
+                        for match in re.finditer(r"[A-Za-z_]+", state.lines[state.row])
+                        if match.start() <= state.column < match.end()
+                    )
+                    assert pattern in marker
+                    assert not any(marker in line for line in lesson.goal_lines)
+                    markers.add(marker)
+                    full_or_partial.add(pattern == marker)
+            assert expected_states_match(step.expected, guided.engine.state)
+        assert guided.state == SessionState.COMPLETED
+        assert guided.engine.state.lines == lesson.goal_lines
+        free = EditingSession(lesson, "free", clock_ns=lambda: 0)
+        for key in lesson.baseline:
+            assert free.submit(key) == InputResult.ACCEPTED
+        assert free.state == SessionState.COMPLETED
+        assert free.engine.state.lines == lesson.goal_lines
+    assert directions == {"/", "?"}
+    assert full_or_partial == {False, True}
+    assert len(markers) >= (30 if profile_id == "code_json" else 70)
+    assert len({marker[:3] for marker in markers}) >= 25
+
+
+def test_json_goals_vary_settings_and_service_groups_without_breaking_schema() -> None:
+    projects: set[str] = set()
+    environments: set[str] = set()
+    hosts: set[str] = set()
+    timeouts: set[int] = set()
+    workers: set[int] = set()
+    log_levels: set[str] = set()
+    health_states: set[str] = set()
+    service_groups: set[tuple[str, ...]] = set()
+    service_names: set[str] = set()
+    for seed in range(24):
+        plan = build_code_document_plan("code_json", 60, Random(seed))
+        document = json.loads("\n".join(plan.goal_lines))
+        projects.add(document["project"])
+        environments.add(document["environment"])
+        hosts.add(document["server"]["host"])
+        timeouts.add(document["server"]["timeout"])
+        workers.add(document["server"]["workers"])
+        log_levels.add(document["logging"]["level"])
+        health_states.add(document["health"]["expected"])
+        services = document["services"]
+        names = tuple(service["name"] for service in services)
+        assert len(names) == len(set(names))
+        assert all(service["path"] == "/api/" + service["name"] for service in services)
+        service_groups.add(names)
+        service_names.update(names)
+    assert len(projects) >= 20
+    assert len(environments) >= 3
+    assert len(hosts) >= 5
+    assert len(timeouts) >= 5
+    assert len(workers) >= 8
+    assert len(log_levels) >= 3
+    assert len(health_states) >= 3
+    assert len(service_groups) == 24
+    assert len(service_names) >= 12
+
+
 def test_code_catalog_keeps_profiles_and_languages_distinct() -> None:
     assert {profile.language for profile in list_code_edit_profiles()} == {
         "python",
@@ -199,7 +311,7 @@ def test_json_practice_remains_available_without_downloaded_sources(
     )
     spec = EditPracticeSpec("code_json", 0, 60)
     lesson = create_edit_problem(spec)
-    assert lesson.content_version == 2 and lesson.generator_version == 3
+    assert lesson.content_version == 3 and lesson.generator_version == 4
     assert lesson.code_excerpt is None
     assert len(lesson.goal_lines) == 60
     assert lesson == generate_edit_lesson(spec)
@@ -262,7 +374,7 @@ def test_selected_code_source_replays_and_survives_catalog_changes(
     lesson = generate_edit_lesson(spec, code_sources=sources)
     assert lesson == generate_edit_lesson(spec, code_sources=(source,))
     assert lesson.practice_spec == spec
-    assert lesson.generator_version == 6
+    assert lesson.generator_version == CODE_SOURCE_SELECTION_VERSION
     assert lesson.code_excerpt is not None
     assert lesson.code_excerpt.source == source.source
     for mode in ("guided", "free"):
@@ -286,12 +398,12 @@ def test_fixed_and_random_source_conditions_have_distinct_signatures(
     )
     assert random_lesson.goal_lines == selected_lesson.goal_lines
     assert random_lesson.guide == selected_lesson.guide
-    assert random_lesson.generator_version == 5
-    assert selected_lesson.generator_version == 6
+    assert random_lesson.generator_version == CODE_GENERATOR_VERSION
+    assert selected_lesson.generator_version == CODE_SOURCE_SELECTION_VERSION
     assert random_lesson.signature != selected_lesson.signature
     assert (
         random_lesson.signature
-        != replace(selected_lesson, generator_version=5).signature
+        != replace(selected_lesson, generator_version=CODE_GENERATOR_VERSION).signature
     )
 
 

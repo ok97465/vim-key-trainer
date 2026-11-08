@@ -6,6 +6,7 @@ import json
 import re
 from collections import Counter
 from dataclasses import replace
+from string import ascii_letters, ascii_lowercase, digits
 
 # Third party imports
 import pytest
@@ -49,7 +50,7 @@ def test_seed_reproduces_stream_and_new_seed_changes_generated_content() -> None
 def test_mixed_profile_covers_requested_commands_and_thousands_of_combinations() -> (
     None
 ):
-    generator = CommandGenerator(COMMAND_PROFILES[0], seed=23)
+    generator = CommandGenerator(COMMAND_PROFILES[0], seed=42)
     # 검색·도구 가족 추가 후에도 희소한 count 없는 dW까지 반복 생성되는지 본다.
     items = [generator.next_item() for _ in range(20_000)]
     displays = Counter(item.display for item in items)
@@ -113,7 +114,7 @@ def test_count_operator_motion_grammar_preserves_multiplication_and_zero_rules()
     operators = "|".join(re.escape(operator.keys) for operator in OPERATORS)
     motions = "|".join(re.escape(motion.keys) for motion in MOTIONS)
     pattern = re.compile(
-        rf'^(?:"[abcxyz+])?([1-9][0-9]?)?({operators})([1-9][0-9]?)?({motions})$'
+        rf'^(?:"[a-z+])?([1-9][0-9]?)?({operators})([1-9][0-9]?)?({motions})$'
     )
     for _ in range(3_000):
         item = generator.next_item()
@@ -137,7 +138,7 @@ def test_text_objects_require_an_operator_and_quote_counts_are_restricted() -> N
     operators = "|".join(re.escape(operator.keys) for operator in OPERATORS)
     objects = "|".join(re.escape(target.keys) for target in TEXT_OBJECTS)
     pattern = re.compile(
-        rf'^(?:"[abcxyz+])?([1-9][0-9]?)?({operators})([1-9][0-9]?)?({objects})$'
+        rf'^(?:"[a-z+])?([1-9][0-9]?)?({operators})([1-9][0-9]?)?({objects})$'
     )
     seen = set()
     for _ in range(3_000):
@@ -187,14 +188,14 @@ def test_simple_edits_keep_character_replacement_and_insert_fragments_distinct()
     seen = set()
     for _ in range(300):
         item = generator.next_item()
-        matched = re.fullmatch(
-            r"([1-9][0-9]?)?([xXDCsSpPr])([abcxyz012_!#])?", item.display
-        )
+        matched = re.fullmatch(r"([1-9][0-9]?)?([xXDCsSpPr])(.)?", item.display)
         assert matched is not None, item.display
         count, command, character = matched.groups()
         seen.add(command)
         assert int(count or "1") <= MAX_COUNT
         assert (character is not None) == (command == "r")
+        if character is not None:
+            assert character.isascii() and character.isprintable()
         if command in {"C", "s", "S"}:
             assert "Insert" in item.follow_up
         elif command in {"p", "P"}:
@@ -305,7 +306,7 @@ def test_counted_summary_preserves_effective_count_and_change_mode(
 
 
 def test_short_summaries_distinguish_word_scope_and_screen_position() -> None:
-    generator = CommandGenerator(COMMAND_PROFILES[0], seed=23)
+    generator = CommandGenerator(COMMAND_PROFILES[0], seed=42)
     expected = {
         "ciw": "현재 단어 변경 → 입력 모드",
         "cw": "커서부터 단어 끝 변경 → 입력 모드",
@@ -344,33 +345,33 @@ def test_incomplete_context_summary_does_not_claim_the_operation_is_finished() -
     (
         (
             "commands_random",
-            2,
-            "c1f2f3dce7f7435a5a9e0a73141c4eedfa7629c3a4f4172a17f8e6ab8d6f3073",
+            3,
+            "ead383523752c65de77842dfcd16ae1b6ddc76ad80dcba1d4328eee365a9be0c",
         ),
         (
             "commands_movement_random",
-            2,
-            "bec6c8b1e4001201fb78e43b528d78c1a3d47dbe12f4924bac3ed569a42f70dd",
+            3,
+            "499b379e01a184ae5bfb8a0df09b37e7c4b044f356930c929d6de02cd2745f2a",
         ),
         (
             "commands_operators_random",
-            2,
-            "6d87d4f3669559682c922b920def39ec7b4f64fda3f396df5a590327b9d8b968",
+            3,
+            "fb3f8b64ba9070a608069223bdc1feeca8a6c062495122eb1d164e82f73dedf7",
         ),
         (
             "commands_objects_random",
-            1,
-            "6f76d2566c5f05fb6d8552d07769320175d1af25bd0a353c59827410a1303085",
+            2,
+            "93ec194a355428fac06f9bec95a972942e00a951b7213fb5d6fdf8a87b5c8916",
         ),
         (
             "commands_insert_random",
-            2,
-            "fa1ab90df7f4e9a5bace2dbbeeeaf553796083278d6f83c7bacbd37152669ae2",
+            3,
+            "51a3211fb80ce2dc18c444c1120fc5f3aca4efe6f6469f82817b85893cbdab58",
         ),
         (
             "commands_context_random",
-            2,
-            "580f5f65e25118606805db2ce1c36a950154db5bc2c64650cdb24c2118d70b11",
+            3,
+            "f9f3604ee4865f0c0270350a2dc008d5846753e311934854ba44752a67b8042c",
         ),
     ),
 )
@@ -414,7 +415,7 @@ def test_focused_object_profile_always_pairs_an_operator_with_a_text_object() ->
     operators = "|".join(re.escape(operator.keys) for operator in OPERATORS)
     objects = "|".join(re.escape(target.keys) for target in TEXT_OBJECTS)
     pattern = re.compile(
-        rf'^(?:"[abcxyz+])?(?:[1-9][0-9]?)?(?:{operators})'
+        rf'^(?:"[a-z+])?(?:[1-9][0-9]?)?(?:{operators})'
         rf"(?:[1-9][0-9]?)?({objects})$"
     )
     seen = set()
@@ -459,8 +460,8 @@ def test_legacy_item_uses_first_sentence_and_rejects_blank_short_meaning() -> No
 def test_search_generation_uses_real_enter_and_explains_required_history() -> None:
     generator = CommandGenerator(profile_for("search"), seed=61)
     commands = set()
-    patterns = set()
-    for _ in range(300):
+    patterns: set[str] = set()
+    for _ in range(600):
         item = generator.next_item()
         first = item.tokens[0].value
         command = next(
@@ -470,13 +471,57 @@ def test_search_generation_uses_real_enter_and_explains_required_history() -> No
         if first in {"/", "?"}:
             assert item.tokens[-1] == KeyToken("special", "enter")
             assert all(token.kind == "char" for token in item.tokens[:-1])
-            patterns.add(tuple(item.tokens[1:-1]))
+            pattern = "".join(token.value for token in item.tokens[1:-1])
+            patterns.add(pattern)
+            assert repr(pattern) in item.meaning
         else:
             assert all(token.kind == "char" for token in item.tokens)
             if command in {"n", "N"}:
                 assert "이전에 확정한 검색어" in item.follow_up
     assert commands == {"/", "?", "n", "N", "*", "#"}
-    assert len(patterns) >= 20
+    assert len(patterns) >= 120
+    assert sum(" " not in pattern for pattern in patterns) > len(patterns) // 2
+    assert any(" " in pattern for pattern in patterns)
+    assert all(not any(char.isdigit() for char in pattern) for pattern in patterns)
+
+
+def test_insert_payloads_and_character_targets_avoid_a_fixed_subset() -> None:
+    insert = CommandGenerator(profile_for("insert"), seed=74)
+    payloads = {
+        "".join(token.value for token in insert.next_item().tokens[1:-1])
+        for _ in range(300)
+    }
+    assert len(payloads) > 250
+    assert len({word.lower() for payload in payloads for word in payload.split()}) > 100
+    assert any(len(payload) == 1 for payload in payloads)
+    assert any(" " in payload for payload in payloads)
+    find = CommandGenerator(profile_for("find"), seed=74)
+    replacements = CommandGenerator(profile_for("simple_edit"), seed=74)
+    targets = {find.next_item().tokens[-1].value for _ in range(1_000)}
+    replaced = {
+        item.tokens[-1].value
+        for _ in range(10_000)
+        if re.fullmatch(r"[1-9]*[0-9]*r.", (item := replacements.next_item()).display)
+    }
+    assert set(ascii_letters + digits) <= targets
+    assert set(ascii_letters + digits) <= replaced
+
+
+def test_register_and_mark_names_use_the_full_local_alphabet() -> None:
+    context = CommandGenerator(profile_for("context"), seed=74)
+    registers = {
+        item.tokens[1].value
+        for _ in range(1_000)
+        if (item := context.next_item()).tokens[0].value == '"'
+    }
+    tools = CommandGenerator(profile_for("normal_tools"), seed=74)
+    marks = {
+        item.tokens[1].value
+        for _ in range(3_000)
+        if (item := tools.next_item()).tokens[0].value in {"m", "'", "`"}
+    }
+    assert set(ascii_lowercase + "+") == registers
+    assert set(ascii_lowercase) == marks
 
 
 def test_normal_tool_generation_covers_new_editing_and_physical_control_keys() -> None:

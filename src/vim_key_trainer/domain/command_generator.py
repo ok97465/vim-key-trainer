@@ -9,13 +9,15 @@ import hashlib
 from collections import deque
 from dataclasses import dataclass
 from random import Random
+from string import ascii_letters, ascii_lowercase, digits
 from typing import Literal
 
 # Local imports
 from vim_key_trainer.domain.commands import CommandItem
 from vim_key_trainer.domain.keys import KeyToken
+from vim_key_trainer.domain.practice_words import practice_word
 
-GENERATOR_VERSION = 3
+GENERATOR_VERSION = 4
 MAX_COUNT = 99
 MAX_COMBINED_COUNT = 999
 CommandFamily = Literal[
@@ -82,7 +84,7 @@ COMMAND_PROFILES = (
         "명령 조합 · 전체",
         "이동·검색·연산자·텍스트 객체·입력과 복합 편집을 계속 생성합니다.",
         _ALL_FAMILIES,
-        content_version=2,
+        content_version=3,
         example="3j  ciw  dW  zz",
     ),
     CommandProfile(
@@ -90,7 +92,7 @@ COMMAND_PROFILES = (
         "이동·화면 이동",
         "횟수·word/WORD 이동·문자 찾기·검색·화면 위치를 조합합니다.",
         ("movement", "screen", "find", "search"),
-        content_version=2,
+        content_version=3,
         example="W  B  2E  22gg  f,  zz",
     ),
     CommandProfile(
@@ -102,7 +104,7 @@ COMMAND_PROFILES = (
             "line_operator",
             "simple_edit",
         ),
-        content_version=2,
+        content_version=3,
         example="dw  dW  de  dE  2dd  yy",
     ),
     CommandProfile(
@@ -110,6 +112,7 @@ COMMAND_PROFILES = (
         "텍스트 객체",
         "diw·diW로 word/WORD 안쪽을 고르고 따옴표·괄호 범위도 연습합니다.",
         ("operator_object",),
+        content_version=2,
         example='diw  diW  ciw  daw  di(  yi"',
     ),
     CommandProfile(
@@ -117,7 +120,7 @@ COMMAND_PROFILES = (
         "문자 입력·특수키",
         "i·a·I·A와 실제 Esc·Enter·Backspace 입력을 반복합니다.",
         ("insert",),
-        content_version=2,
+        content_version=3,
         example="iab<Esc>  A!<Esc>",
     ),
     CommandProfile(
@@ -125,7 +128,7 @@ COMMAND_PROFILES = (
         "이력·레지스터·복합 명령",
         "undo·redo, 레지스터·검색 이력·줄 편집과 여러 명령의 연결을 연습합니다.",
         ("history", "context", "sequence", "normal_tools"),
-        content_version=2,
+        content_version=3,
         example='u<C-r>  qa  "+y  jdiw',
     ),
 )
@@ -428,7 +431,7 @@ class CommandGenerator:
 
     def _find(self) -> CommandItem:
         command = self._random.choice(("f", "F", "t", "T"))
-        target = self._random.choice("abcxyz_.,;:()[]{}<>/='\"")
+        target = self._random.choice(ascii_letters + digits + "_.,;:()[]{}<>/='\"")
         count = self._count()
         direction = "오른쪽" if command.islower() else "왼쪽"
         stop = "문자 위" if command in "fF" else "찾은 문자의 바로 앞(진행 방향 기준)"
@@ -445,7 +448,7 @@ class CommandGenerator:
     def _register(self, operator: Operator) -> tuple[str, str, str]:
         if not operator.register_allowed or self._random.random() < 0.85:
             return "", "", ""
-        register = self._random.choice("abcxyz+")
+        register = self._random.choice(ascii_lowercase + "+")
         note = f" {register} 레지스터를 지정합니다."
         if register == "+":
             note += " 실제 Vim의 클립보드 지원이 필요하며 "
@@ -547,10 +550,15 @@ class CommandGenerator:
         )
 
     def _text(self) -> str:
-        return "".join(
-            self._random.choice("abcxyz012_!#")
-            for _ in range(self._random.randint(1, 4))
-        )
+        variant = self._random.randrange(6)
+        if variant == 0:
+            return self._random.choice(ascii_letters + digits + "_!#")
+        word = practice_word(self._random)
+        if variant == 1:
+            return word + " " + practice_word(self._random, exclude=(word,))
+        if variant == 2:
+            return word.capitalize()
+        return word
 
     def _simple_edit(self) -> CommandItem:
         command = self._random.choice(("x", "X", "D", "C", "s", "S", "p", "P", "r"))
@@ -578,7 +586,7 @@ class CommandGenerator:
             "줄 단위 내용이면 이전 줄에 붙입니다.",
         }
         if command == "r":
-            character = self._random.choice("abcxyz012_!#")
+            character = self._random.choice(ascii_letters + digits + "_.,;:!?=+-")
             text += character
             meaning = (
                 f"커서 아래부터 같은 줄의 {count}문자를 "
@@ -674,10 +682,14 @@ class CommandGenerator:
         command = self._random.choice(("/", "?", "n", "N", "*", "#"))
         count = self._count()
         if command in {"/", "?"}:
-            pattern = self._random.choice(("cache", "ready", "value", "worker"))
-            pattern += (
-                str(self._random.randrange(10)) if self._random.random() < 0.4 else ""
-            )
+            pattern = practice_word(self._random)
+            variant = self._random.randrange(6)
+            if variant == 0:
+                pattern += " " + practice_word(self._random, exclude=(pattern,))
+            elif variant == 1 and len(pattern) > 4:
+                pattern = pattern[: self._random.randrange(3, len(pattern))]
+            elif variant == 2:
+                pattern = pattern.capitalize()
             direction = "앞" if command == "/" else "뒤"
             return _item(
                 _characters(command + pattern) + (_ENTER,),
@@ -752,7 +764,7 @@ class CommandGenerator:
             tokens = _characters("R" + self._text()) + (_ESC,)
             brief = "Replace 모드에서 덮어쓰기 → Esc"
         elif variant == 8:
-            name = self._random.choice("abcxyz")
+            name = self._random.choice(ascii_lowercase)
             command = self._random.choice(("m", "'", "`"))
             tokens = _characters(command + name)
             brief = f"{name} 마크 " + ("설정" if command == "m" else "위치로 이동")
@@ -772,7 +784,7 @@ class CommandGenerator:
 
     def _context(self) -> CommandItem:
         if self._random.random() < 0.5:
-            register = self._random.choice("abcdefghijklmnopqrstuvwxyz")
+            register = self._random.choice(ascii_lowercase)
             return _item(
                 _characters("q" + register),
                 f"{register} 레지스터에 매크로 기록을 시작합니다.",
@@ -780,7 +792,7 @@ class CommandGenerator:
                 "이 항목은 기록 시작 조각이며 앱은 매크로를 실행하지 않습니다.",
                 short_meaning=f"{register}에 매크로 기록 시작 · q로 종료",
             )
-        register = self._random.choice("abcxyz+")
+        register = self._random.choice(ascii_lowercase + "+")
         clipboard_note = ""
         if register == "+":
             clipboard_note = " 실제 Vim의 클립보드 지원이 필요합니다."

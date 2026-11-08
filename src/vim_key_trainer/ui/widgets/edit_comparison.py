@@ -41,9 +41,11 @@ class EditComparison(QWidget):
         self._goal_position: tuple[int, int] | None = None
         self.current_scroll = self._scroll_area(self.practice_input)
         self.goal_scroll = self._scroll_area(self.goal_document)
+        self._automatic_goal_scroll = (0, 0)
         self.goal_heading = label("목표 문서 · 수정 위치 강조", "muted")
         self.guide_overlay = EditGuideOverlay(self.current_scroll.viewport())
         self.current_scroll.viewport().installEventFilter(self)
+        self.goal_scroll.viewport().installEventFilter(self)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)
@@ -76,6 +78,7 @@ class EditComparison(QWidget):
         self.goal_scroll.verticalScrollBar().setValue(0)
         self.current_scroll.horizontalScrollBar().setValue(0)
         self.goal_scroll.horizontalScrollBar().setValue(0)
+        self._automatic_goal_scroll = self._goal_scroll_values()
         self.show_current(current)
 
     @property
@@ -110,7 +113,11 @@ class EditComparison(QWidget):
         follow_viewport: bool = False,
         goal_position: tuple[int, int] | None = None,
     ) -> None:
+        previous_top = self.current_scroll.verticalScrollBar().value()
+        lines_changed = state.lines != self.practice_input.editor_state.lines
+        goal_is_automatic = self._goal_scroll_values() == self._automatic_goal_scroll
         self.practice_input.set_viewport_height(self.current_scroll.viewport().height())
+        self.goal_document.set_viewport_height(self.goal_scroll.viewport().height())
         self.practice_input.show_state(state)
         previous_count = self.remaining_changes
         self.diff = compare_documents(
@@ -137,6 +144,46 @@ class EditComparison(QWidget):
             # 오타·대기 명령의 갱신은 사용자가 따로 스크롤한 목표를 되돌리지 않는다.
             self._goal_position = goal_position
             self._ensure_goal_visible()
+        elif goal_is_automatic and (
+            lines_changed
+            or previous_top != self.current_scroll.verticalScrollBar().value()
+        ):
+            # 예고 위치가 같아도 현재 화면이 도착하면 대응 행을 같은 높이에 둔다.
+            self._align_goal_to_current()
+
+    def _goal_scroll_values(self) -> tuple[int, int]:
+        return (
+            self.goal_scroll.verticalScrollBar().value(),
+            self.goal_scroll.horizontalScrollBar().value(),
+        )
+
+    def _align_goal_to_current(self) -> None:
+        if self._goal_position is None:
+            return
+        current = self.practice_input.editor_state
+        current_spacing = self.practice_input.document_metrics.lineSpacing()
+        goal_spacing = self.goal_document.document_metrics.lineSpacing()
+        mapped_row = self.diff.goal_rows[current.row]
+        position = round(
+            self.current_scroll.verticalScrollBar().value()
+            + mapped_row * goal_spacing
+            - current.row * current_spacing
+        )
+        target_row = self._goal_position[0]
+        target_top = 16 + target_row * goal_spacing - position
+        visible_bottom = min(
+            self.current_scroll.viewport().height() - self._guide_clearance,
+            self.goal_scroll.viewport().height(),
+        )
+        bar = self.goal_scroll.verticalScrollBar()
+        if (
+            bar.minimum() <= position <= bar.maximum()
+            and target_top >= 0
+            and target_top + goal_spacing <= visible_bottom
+        ):
+            # 먼 위치 예고는 유지한다. 대응 화면에 예고 줄까지 들어올 때만 맞춘다.
+            bar.setValue(position)
+            self._automatic_goal_scroll = self._goal_scroll_values()
 
     def _ensure_goal_visible(self) -> None:
         if self._goal_position is None:
@@ -155,6 +202,8 @@ class EditComparison(QWidget):
             24,
             24,
         )
+        self._align_goal_to_current()
+        self._automatic_goal_scroll = self._goal_scroll_values()
 
     @property
     def remaining_changes(self) -> int:
@@ -177,6 +226,8 @@ class EditComparison(QWidget):
         self._ensure_goal_visible()
 
     def _ensure_cursor_visible(self) -> None:
+        previous_top = self.current_scroll.verticalScrollBar().value()
+        goal_is_automatic = self._goal_scroll_values() == self._automatic_goal_scroll
         clearance = self._guide_clearance
         self.practice_input.set_viewport_height(self.current_scroll.viewport().height())
         cursor = self.practice_input.cursor_rect
@@ -192,6 +243,11 @@ class EditComparison(QWidget):
             scroll_bar.setValue(
                 max(scroll_bar.value(), ceil(cursor.bottom() - visible_bottom))
             )
+        if (
+            goal_is_automatic
+            and previous_top != self.current_scroll.verticalScrollBar().value()
+        ):
+            self._align_goal_to_current()
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
@@ -199,12 +255,19 @@ class EditComparison(QWidget):
         QTimer.singleShot(0, self._ensure_views_visible)
 
     def _ensure_views_visible(self) -> None:
+        self.practice_input.set_viewport_height(self.current_scroll.viewport().height())
+        self.goal_document.set_viewport_height(self.goal_scroll.viewport().height())
         self._ensure_cursor_visible()
         self._ensure_goal_visible()
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         if isinstance(event, QResizeEvent):
-            self.practice_input.set_viewport_height(event.size().height())
+            document = (
+                self.practice_input
+                if watched is self.current_scroll.viewport()
+                else self.goal_document
+            )
+            document.set_viewport_height(event.size().height())
         return super().eventFilter(watched, event)
 
     def set_paused(self, paused: bool) -> None:

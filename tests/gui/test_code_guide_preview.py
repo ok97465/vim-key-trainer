@@ -119,6 +119,24 @@ def test_far_target_in_long_line_is_visible_before_navigation_and_replays(
         for key in step.keys:
             qtbot.keyClicks(page.practice_input, key.value)
         assert expected_states_match(step.expected, session.engine.state)
+        if session.state != SessionState.COMPLETED and session.engine.state.row == row:
+            current_document = page.comparison.practice_input
+            goal_document = page.comparison.goal_document
+            current_y = (
+                current_document.mapTo(
+                    page.comparison.current_scroll.viewport(), QPoint()
+                ).y()
+                + 16
+                + row * current_document.document_metrics.lineSpacing()
+            )
+            goal_y = (
+                goal_document.mapTo(
+                    page.comparison.goal_scroll.viewport(), QPoint()
+                ).y()
+                + 16
+                + row * goal_document.document_metrics.lineSpacing()
+            )
+            assert abs(current_y - goal_y) <= 1
     assert session.state == SessionState.COMPLETED
     assert session.engine.state.lines == tuple(goal)
     assert session.key_count == lesson.baseline_keys

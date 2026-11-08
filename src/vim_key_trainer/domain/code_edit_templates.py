@@ -3,7 +3,7 @@
 # Standard library imports
 import re
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import gcd
 from random import Random
 
@@ -23,9 +23,10 @@ from vim_key_trainer.domain.edit_templates import (
 )
 from vim_key_trainer.domain.edit_weights import EditTechniqueWeights
 from vim_key_trainer.domain.keys import KeyToken
+from vim_key_trainer.domain.practice_words import IdentifierPool, practice_word
 from vim_key_trainer.engine import SUPPORTED_COMMANDS, EditEngine, EditorState
 
-CODE_GENERATOR_VERSION = 5
+CODE_GENERATOR_VERSION = 7
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,56 +37,84 @@ class _Candidate:
 
 
 def _json_source(count: int, rng: Random) -> list[str]:
-    project = rng.choice(("warehouse", "inventory", "shipment"))
+    project = practice_word(rng)
     port = rng.randrange(8000, 9000)
+    timeout = rng.choice((10, 15, 20, 30, 45, 60, 90))
+    workers = rng.randrange(2, 17)
+    services = rng.sample(
+        (
+            "catalog",
+            "shipping",
+            "reporting",
+            "billing",
+            "notifications",
+            "search",
+            "analytics",
+            "inventory",
+            "orders",
+            "accounts",
+            "media",
+            "archive",
+            "metrics",
+            "delivery",
+            "support",
+            "checkout",
+        ),
+        7,
+    )
+    first, second, *additional = services
+    environment = rng.choice(("production", "staging", "testing", "development"))
+    host = rng.choice(("127.0.0.1", "localhost", f"{project}.internal"))
+    regions = rng.sample(("north", "south", "east", "west", "central"), 3)
+    expected = rng.choice(("ready", "healthy", "available", "online"))
     lines = f'''{{
     "project": "{project}",
     "version": 3,
     "enabled": true,
-    "environment": "production",
+    "environment": "{environment}",
     "server": {{
-        "host": "127.0.0.1",
+        "host": "{host}",
         "port": {port},
-        "timeout": 30,
-        "workers": 4
+        "timeout": {timeout},
+        "workers": {workers}
     }},
     "logging": {{
-        "level": "info",
-        "format": "structured",
+        "level": "{rng.choice(("info", "warning", "debug", "error"))}",
+        "format": "{rng.choice(("structured", "compact", "plain"))}",
         "targets": ["console", "file"]
     }},
-    "limits": {{"requests": 120, "burst": 20}},
-    "regions": ["north", "south", "west"],
+    "limits": {{"requests": {rng.randrange(50, 501)}, "burst": {rng.randrange(5, 51)}}},
+    "regions": ["{regions[0]}", "{regions[1]}", "{regions[2]}"],
     "services": [
         {{
-            "name": "catalog",
-            "path": "/api/catalog",
-            "retries": 3,
+            "name": "{first}",
+            "path": "/api/{first}",
+            "retries": {rng.randrange(1, 10)},
             "cache": true
         }},
         {{
-            "name": "shipping",
-            "path": "/api/shipping",
-            "retries": 5,
+            "name": "{second}",
+            "path": "/api/{second}",
+            "retries": {rng.randrange(1, 10)},
             "cache": false
         }}
     ],
     "health": {{
         "path": "/health",
-        "interval": 15,
-        "expected": "ready"
+        "interval": {rng.choice((5, 10, 15, 30, 60))},
+        "expected": "{expected}"
     }},
     "fallback": null
 }}'''.splitlines()
-    for name in ("reporting", "billing", "notifications", "search", "analytics"):
+    for name in additional:
         addition = f'''        {{
             "name": "{name}",
             "path": "/api/{name}",
-            "retries": 3,
-            "cache": true
+            "retries": {rng.randrange(1, 10)},
+            "cache": {rng.choice(("true", "false"))}
         }},'''.splitlines()
         if len(lines) + len(addition) <= count:
-            index = lines.index('            "name": "catalog",') - 1
+            index = lines.index(f'            "name": "{first}",') - 1
             lines[index:index] = addition
     return lines
 
@@ -106,11 +135,49 @@ def _candidate(
     )
 
 
+def _vary_search(
+    candidate: _Candidate,
+    initial: tuple[str, ...],
+    goal: tuple[str, ...],
+    rng: Random,
+) -> _Candidate:
+    """전체 단어·부분 문자열 중 문서에서 한 곳만 가리키는 검색어를 고른다."""
+    if candidate.technique != "search":
+        return candidate
+    action = candidate.recipe.actions[0]
+    enter = action.keys.index(ENTER)
+    old = "".join(key.value for key in action.keys[1:enter])
+    fragments = sorted(
+        {old[:length] for length in range(3, len(old))}
+        | {old[-length:] for length in range(3, len(old))}
+    )
+
+    # 겹치는 부분 일치도 센다. 다른 오류·원문의 식별자로 이동하면 안 된다.
+    def is_unique(fragment: str) -> bool:
+        if any(fragment in line for line in goal):
+            return False
+        matches = 0
+        for line in initial:
+            index = line.find(fragment)
+            if index >= 0:
+                matches += 1
+                if matches > 1 or line.find(fragment, index + 1) >= 0:
+                    return False
+        return matches == 1
+
+    unique = [fragment for fragment in fragments if is_unique(fragment)]
+    pattern = rng.choice(unique) if unique and rng.randrange(3) == 0 else old
+    keys = (action.keys[0],) + characters(pattern) + action.keys[enter:]
+    recipe = replace(candidate.recipe, actions=(replace(action, keys=keys),))
+    return replace(candidate, recipe=recipe)
+
+
 def _candidates(
     lines: tuple[str, ...], rng: Random, *, include_zero: bool = True
 ) -> list[_Candidate]:
     result: list[_Candidate] = []
     first_rows: dict[str, int] = {}
+    identifiers = IdentifierPool(rng, lines)
     number_pattern = (
         r"(?<![\w.-])(0|[1-9][0-9]*)(?![\w.])"
         if include_zero
@@ -119,16 +186,16 @@ def _candidates(
     for row, line in enumerate(lines):
         if not line.strip():
             continue
+        old = identifiers.take()
         words = list(re.finditer(r"\b[a-z][a-z_]{2,}\b", line))
         if words:
             word = rng.choice(words)
-            old = f"draft_{row}"
             broken = line[: word.start()] + old + line[word.end() :]
             for technique in ("word", "search", "substitution", "visual"):
                 keys = characters("ciw" + word.group()) + (ESC,)
                 column: int | None = word.start()
                 if technique == "search":
-                    keys = characters("/\\<" + old + "\\>") + (ENTER,) + keys
+                    keys = characters(rng.choice(("/", "?")) + old) + (ENTER,) + keys
                     column = None
                 elif technique == "substitution":
                     keys = characters(":s/" + old + "/" + word.group() + "/g") + (
@@ -170,7 +237,6 @@ def _candidates(
             if not matches:
                 continue
             match = rng.choice(matches)
-            old = "draft_value"
             broken = line[: match.start(1)] + old + line[match.end(1) :]
             use_pair = obj not in {'"', "'"} and rng.choice((True, False))
             command = ("%" if use_pair else "") + "ci" + obj
@@ -231,7 +297,10 @@ def _candidates(
             )
         if line.rstrip().endswith((";", ",", ":", ")", "]", "}")):
             position = len(line.rstrip()) - 1
-            broken = line[:position] + "?" + line[position + 1 :]
+            wrong = rng.choice(
+                tuple(char for char in ";:,!?" if char != line[position])
+            )
+            broken = line[:position] + wrong + line[position + 1 :]
             result.append(
                 _candidate(
                     "movement",
@@ -266,7 +335,7 @@ def _candidates(
                     "copy",
                     row,
                     (line,),
-                    ("    obsolete_line",),
+                    ("    " + old,),
                     None,
                     characters(f'{source + 1}G"ayy{row + 1}Gdd"a{put}'),
                     f'a 레지스터에 줄을 복사하고 잘못된 줄을 dd·"a{put}로 교체합니다.',
@@ -401,9 +470,13 @@ def build_code_document_plan(
         initial[recipe.row : recipe.row + recipe.span] = candidate.broken
     # 줄 수를 유지하므로 위에서부터 읽으며 고친다. 복사 원본도 항상 대상보다
     # 위에 있어 손상된 원본을 먼저 복구한 뒤 아래 행에 복사할 수 있다.
-    ordered = sorted(selected, key=lambda candidate: candidate.recipe.row)
+    initial_lines = tuple(initial)
+    ordered = [
+        _vary_search(candidate, initial_lines, goal, rng)
+        for candidate in sorted(selected, key=lambda candidate: candidate.recipe.row)
+    ]
     return DocumentPlan(
-        tuple(initial),
+        initial_lines,
         goal,
         tuple(item.recipe for item in ordered),
         (

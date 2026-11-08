@@ -1,6 +1,7 @@
 """긴 편집 문서의 재현성·수정량·다양성과 풀이 재생을 검증한다."""
 
 # Standard library imports
+import re
 from collections import Counter
 from dataclasses import FrozenInstanceError
 from difflib import SequenceMatcher
@@ -223,10 +224,16 @@ def test_word_motion_guides_replay_and_inner_objects_preserve_adjacent_delimiter
                 if outcome.command in {"diw", "diW"}:
                     inner_deletes.add(outcome.command)
                     assert engine.state.column < before.column
-                    if outcome.command == "diw":
-                        assert "state=; ready" in engine.state.lines[before.row]
-                    else:
-                        assert engine.state.lines[before.row] == "endpoint  ready"
+                    line = before.lines[before.row]
+                    pattern = r"\w+" if outcome.command == "diw" else r"\S+"
+                    word = next(
+                        match
+                        for match in re.finditer(pattern, line)
+                        if match.start() <= before.column < match.end()
+                    )
+                    assert engine.state.lines[before.row] == (
+                        line[: word.start()] + line[word.end() :]
+                    )
             assert engine.state == step.expected
         assert engine.state.lines == lesson.goal_lines
     assert motions == {"W", "B", "e", "E"}
@@ -290,35 +297,47 @@ def test_rich_recipes_replay_objects_line_tools_copy_find_and_numeric_changes() 
     assert {"ctrl+a", "ctrl+x"} <= chords
 
 
-@pytest.mark.parametrize(
-    ("seed", "command"), [(3, "bcw"), (2, "ciw"), (12, "cib"), (8, "da]")]
-)
+@pytest.mark.parametrize("command", ["bcw", "ciw", "cib", "da]"])
 def test_generated_object_guides_cover_inner_change_and_around_delete(
-    seed: int, command: str
+    command: str,
 ) -> None:
-    lesson = generate_edit_lesson(EditPracticeSpec("editing_delete_word", seed, 40))
-    engine = EditEngine(lesson.initial, lesson.allowed_commands)
     exercised = False
-    for step in lesson.guide:
-        before = engine.state
-        for key in step.keys:
-            assert engine.submit(key).accepted
-        if not "".join(key.display for key in step.keys).startswith(command):
-            continue
-        exercised = True
-        line = before.lines[before.row]
-        if command in {"ciw", "bcw"}:
-            assert line[before.column - 2 :].startswith("obsolete")
-            assert engine.state.lines[before.row] == line.replace("obsolete", "stable")
-        elif command == "cib":
-            assert engine.state.lines[before.row] == line.replace(
-                "(draft value)", "(verified)"
+    for seed in range(48):
+        lesson = generate_edit_lesson(EditPracticeSpec("editing_delete_word", seed, 40))
+        engine = EditEngine(lesson.initial, lesson.allowed_commands)
+        for step in lesson.guide:
+            before = engine.state
+            for key in step.keys:
+                assert engine.submit(key).accepted
+            if not "".join(key.display for key in step.keys).startswith(command):
+                continue
+            exercised = True
+            line = before.lines[before.row]
+            inserted = "".join(
+                key.value for key in step.keys[len(command) :] if key.kind == "char"
             )
-        else:
-            assert engine.state.lines[before.row] == line.replace("[draft value]", "")
-        assert engine.state.mode == "normal" and not engine.state.pending
+            if command in {"ciw", "bcw"}:
+                word = next(
+                    match
+                    for match in re.finditer(r"\w+", line)
+                    if match.start() <= before.column < match.end()
+                )
+                start, stop = word.span()
+            elif command == "cib":
+                start = line.rfind("(", 0, before.column + 1) + 1
+                stop = line.index(")", before.column)
+            else:
+                start = line.rfind("[", 0, before.column + 1)
+                stop = line.index("]", before.column) + 1
+                assert inserted == ""
+            assert (
+                engine.state.lines[before.row] == line[:start] + inserted + line[stop:]
+            )
+            assert engine.state.mode == "normal" and not engine.state.pending
+        assert goal_matches(lesson, engine.state)
+        if exercised:
+            break
     assert exercised
-    assert goal_matches(lesson, engine.state)
 
 
 @pytest.mark.parametrize("document_lines", EDIT_DOCUMENT_LENGTHS)
@@ -429,8 +448,14 @@ def test_compound_guides_reuse_delimiters_and_preserve_neighboring_fields() -> N
                 command = "ct;" if "ct;" in step_commands else "cf;"
                 phrase_lengths[command].add(len(phrase.split()))
                 separator = ";" if command == "ct;" else ","
+                new_value = "".join(
+                    key.value for key in step.keys[3:-1] if key.kind == "char"
+                ).removesuffix(",")
                 expected = (
-                    line.split(" state=", 1)[0] + f" state=ready{separator} owner=team"
+                    line[: before.column]
+                    + new_value
+                    + separator
+                    + line.split(";", 1)[1]
                 )
                 assert engine.state.lines[before.row] == expected
             if step.keys[0] == KeyToken("char", ";") and "r" in step_commands:
@@ -503,6 +528,63 @@ def test_word_problems_balance_skills_instead_of_counting_aliases_as_new_skills(
 
 def _only_technique(name: str) -> EditTechniqueWeights:
     return EditTechniqueWeights(**{key: int(key == name) for key, _ in EDIT_TECHNIQUES})
+
+
+def test_generated_word_and_object_edits_vary_the_changed_content() -> None:
+    changes: dict[str, set[tuple[tuple[str, str], ...]]] = {
+        command: set() for command in ("ciw", "ciW", 'ci"', "cis", "cip")
+    }
+    for profile, weights in (
+        ("editing_delete_word", None),
+        ("editing_compound", _only_technique("word")),
+    ):
+        for seed in range(48):
+            plan = build_document_plan(profile, 40, Random(seed), weights)
+            for recipe in plan.recipes:
+                commands = _recipe_commands(plan, recipe)
+                before = "\n".join(plan.lines[recipe.row : recipe.row + recipe.span])
+                after = "\n".join(recipe.replacement)
+                fragments = tuple(
+                    (before[start:stop], after[new_start:new_stop])
+                    for tag, start, stop, new_start, new_stop in SequenceMatcher(
+                        a=before, b=after, autojunk=False
+                    ).get_opcodes()
+                    if tag != "equal"
+                )
+                for command in commands & changes.keys():
+                    changes[command].add(fragments)
+    # 주변 이름만 달라지는 고정 obsolete→stable 등의 과제를 검출한다.
+    assert all(len(values) >= 8 for values in changes.values())
+
+
+def test_generated_search_terms_vary_and_do_not_match_other_repairs() -> None:
+    patterns: list[str] = []
+    weights = _only_technique("search")
+    for document_lines in EDIT_DOCUMENT_LENGTHS:
+        for seed in range(12):
+            spec = EditPracticeSpec("editing_compound", seed, document_lines, weights)
+            lesson = generate_edit_lesson(spec)
+            assert lesson == generate_edit_lesson(spec)
+            engine = EditEngine(lesson.initial, lesson.allowed_commands)
+            for key in lesson.baseline:
+                before = engine.state
+                outcome = engine.submit(key)
+                assert outcome.accepted
+                if outcome.command in {"/", "?"}:
+                    pattern = before.command_line[1:]
+                    patterns.append(pattern)
+                    assert all(
+                        pattern not in line
+                        for row, line in enumerate(before.lines)
+                        if row != before.row
+                    )
+                    assert all(pattern not in line for line in lesson.goal_lines)
+            assert goal_matches(lesson, engine.state)
+    assert len(set(patterns)) >= 48
+    assert sum(pattern.isalpha() and pattern.islower() for pattern in patterns) > (
+        len(patterns) * 0.6
+    )
+    assert all(not any(char.isdigit() for char in pattern) for pattern in patterns)
 
 
 @pytest.mark.parametrize("technique", [name for name, _ in EDIT_TECHNIQUES])

@@ -70,7 +70,7 @@ def test_catalog_prepares_full_document_with_default_length(
     assert session.lesson.practice_spec is not None
     assert session.lesson.practice_spec.document_lines == 24
     assert len(session.engine.state.lines) == 24
-    assert session.lesson.content_version == 8
+    assert session.lesson.content_version == 9
     assert session.state == SessionState.READY
     assert session.key_count == 0 and session.elapsed_seconds == 0
     assert page.length_combo.currentData() == 24
@@ -304,7 +304,7 @@ def test_short_practice_has_seven_repairs_and_returns_to_long_document(
     assert intro.lesson.practice_spec == EditPracticeSpec(
         spec.profile_id, spec.seed, 12
     )
-    assert intro.lesson.content_version == 8
+    assert intro.lesson.content_version == 9
     assert len(intro.lesson.initial.lines) == 12
     assert page.comparison.remaining_changes >= 7
     assert intro.mode == "free" and page.length_combo.isVisible()

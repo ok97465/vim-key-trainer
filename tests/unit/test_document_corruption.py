@@ -125,8 +125,8 @@ def test_document_repair_versions_the_extended_word_command_conditions() -> None
         lesson.allowed_commands
     )
     assert lesson.content_version == mission.content_version == 6
-    assert lesson.generator_version == DOCUMENT_GENERATOR_VERSION == 8
-    assert lesson.baseline_version == 7
+    assert lesson.generator_version == DOCUMENT_GENERATOR_VERSION == 9
+    assert lesson.baseline_version == 8
 
 
 def test_each_document_has_many_actual_variants_and_damage_command_families() -> None:
@@ -417,7 +417,9 @@ def test_repeated_word_damage_has_a_short_global_substitution_repair() -> None:
     for key in damage.tokens:
         assert engine.submit(key).accepted
     after = engine.state.lines[0]
-    assert after == before.replace(" ready ", " draft ")
+    replacement = after.split()[1]
+    assert replacement not in before.split()
+    assert after == before.replace(" ready ", f" {replacement} ")
     assert after.endswith("tail; unready ready_state")
     guide = GuideBuilder(EditorState((after,)), SUPPORTED_COMMANDS)
     _record_repair(
@@ -438,7 +440,9 @@ def test_repeated_word_damage_does_not_reuse_an_existing_source_word() -> None:
     for key in damage.tokens:
         assert engine.submit(key).accepted
     after = engine.state.lines[0]
-    assert after == "alpha trace beta draft gamma trace tail"
+    replacement = after.split()[1]
+    assert replacement not in before.split()
+    assert after == before.replace(" ready ", f" {replacement} ")
     guide = GuideBuilder(EditorState((after,)), SUPPORTED_COMMANDS)
     _record_repair(
         guide, CorruptionOperation(0, damage.kind, damage.tokens, before, after)
@@ -447,6 +451,65 @@ def test_repeated_word_damage_does_not_reuse_an_existing_source_word() -> None:
     assert len(guide.steps) == 1
     assert guide.steps[0].keys[0] == KeyToken("char", ":")
     assert guide.steps[0].keys[-2] == KeyToken("char", "g")
+
+
+@pytest.mark.parametrize(
+    ("line", "needs_boundaries"),
+    [
+        ("alpha ready beta ready gamma", False),
+        ("alpha ready beta ready unready ready_state", True),
+    ],
+)
+def test_substitution_uses_word_boundaries_only_for_partial_word_conflicts(
+    line: str, needs_boundaries: bool
+) -> None:
+    damage = _damage(line, "substitute", Random(7))
+    command = "".join(key.value for key in damage.tokens)
+    assert (r"\<" in command or r"\>" in command) == needs_boundaries
+    engine = EditEngine(EditorState((line,)), SUPPORTED_COMMANDS)
+    for key in damage.tokens:
+        assert engine.submit(key).accepted
+    after = engine.state.lines[0]
+    if needs_boundaries:
+        assert after.endswith("unready ready_state")
+    guide = GuideBuilder(EditorState((after,)), SUPPORTED_COMMANDS)
+    _record_repair(
+        guide, CorruptionOperation(0, damage.kind, damage.tokens, line, after)
+    )
+    assert guide.engine.state.lines == (line,)
+
+
+@pytest.mark.parametrize(
+    ("kind", "line"),
+    [
+        ("change_word", "alpha ready omega"),
+        ("quoted", 'config "ready" tail'),
+        ("block", "config (ready) tail"),
+        ("bracketed", "alpha ready omega"),
+        ("substitute", "alpha ready beta ready gamma"),
+    ],
+)
+def test_word_damage_varies_its_content_and_keeps_independent_repairs(
+    kind: CorruptionKind, line: str
+) -> None:
+    damaged_lines: set[str] = set()
+    for seed in range(32):
+        damage = _damage(line, kind, Random(seed))
+        assert damage.kind == kind
+        engine = EditEngine(EditorState((line,), column=damage.column or 0))
+        for key in damage.tokens:
+            assert engine.submit(key).accepted
+        after = engine.state.lines[0]
+        assert after != line
+        assert abs(len(after) - len(line)) <= 12
+        damaged_lines.add(after)
+        guide = GuideBuilder(EditorState((after,)), SUPPORTED_COMMANDS)
+        _record_repair(
+            guide, CorruptionOperation(0, damage.kind, damage.tokens, line, after)
+        )
+        assert guide.engine.state.lines == (line,)
+        assert guide.engine.state.mode == "normal" and not guide.engine.state.pending
+    assert len(damaged_lines) >= 28
 
 
 @pytest.mark.parametrize(
