@@ -123,6 +123,49 @@ def test_python_token_colors_do_not_execute_source() -> None:
     )
 
 
+@pytest.mark.parametrize("prefix", [(), ("def partial():",)])
+def test_python_excerpt_keeps_coloring_after_inconsistent_indentation(
+    prefix: tuple[str, ...],
+) -> None:
+    lines = prefix + (
+        "        value = 1",
+        "    return value",
+        "",
+        "def render():",
+        '    return "ready"',
+    )
+    spans = lexical_spans(lines, "python")
+    offset = len(prefix)
+    assert TextSpan(offset + 1, 4, 10, "keyword") in spans
+    assert TextSpan(offset + 3, 0, 3, "keyword") in spans
+    assert TextSpan(offset + 4, 11, 18, "string") in spans
+    assert len(spans) == len(set(spans))
+    assert all(span.end <= len(lines[span.row]) for span in spans)
+
+
+def test_python_indentation_recovery_preserves_multiline_string_context() -> None:
+    lines = (
+        "        value = 1",
+        "    return value",
+        "  fallback = 2",
+        "def render():",
+        '    """class Fake:',
+        "    return 42",
+        '    """',
+        '    return "ready"',
+    )
+    spans = lexical_spans(lines, "python")
+    assert TextSpan(1, 4, 10, "keyword") in spans
+    assert TextSpan(2, 13, 14, "number") in spans
+    assert tuple(span for span in spans if 4 <= span.row <= 6) == (
+        TextSpan(4, 4, len(lines[4]), "string"),
+        TextSpan(5, 0, len(lines[5]), "string"),
+        TextSpan(6, 0, len(lines[6]), "string"),
+    )
+    assert TextSpan(7, 4, 10, "keyword") in spans
+    assert TextSpan(7, 11, 18, "string") in spans
+
+
 def test_python_multiline_string_and_incomplete_input_stay_in_document_bounds() -> None:
     lines = ('value = """first', 'last"""', "result = (")
     spans = lexical_spans(lines, "python")
@@ -169,6 +212,63 @@ def test_markdown_can_dispatch_fenced_python_and_cpp_coloring() -> None:
     assert TextSpan(3, 0, 6, "keyword") in spans
     assert TextSpan(6, 0, 3, "keyword") in spans
     assert lexical_spans(lines, "text") == ()
+
+
+def test_json_keys_values_literals_and_numbers_have_distinct_lexical_roles() -> None:
+    lines = (
+        '{"name" : "true 42", "enabled": false,',
+        ' "limit": -1.25e+3, "fallback": null, "flags": [true]}',
+    )
+    spans = lexical_spans(lines, "json")
+    colored = [
+        (span.row, lines[span.row][span.start : span.end], span.role) for span in spans
+    ]
+    assert (0, '"name"', "property") in colored
+    assert (0, '"true 42"', "string") in colored
+    assert (0, "false", "keyword") in colored
+    assert (1, "-1.25e+3", "number") in colored
+    assert (1, "null", "keyword") in colored
+    assert (1, "true", "keyword") in colored
+    assert {text for _, text, role in colored if role == "operator"} == {
+        "{",
+        "}",
+        "[",
+        "]",
+        ":",
+        ",",
+    }
+    assert not any(
+        span.role in {"keyword", "number"} and 10 <= span.start < 19
+        for span in spans
+        if span.row == 0
+    )
+
+
+def test_json_escaped_quotes_and_unfinished_strings_keep_following_rows() -> None:
+    lines = (
+        r'{"escaped\"key": "value\\path"}',
+        '"broken": "unfinished\\',
+        '"next": 12,',
+    )
+    spans = lexical_spans(lines, "json")
+    assert TextSpan(0, 1, 15, "property") in spans
+    assert TextSpan(1, 10, len(lines[1]), "string") in spans
+    assert TextSpan(2, 0, 6, "property") in spans
+    assert TextSpan(2, 8, 10, "number") in spans
+    assert all(span.end <= len(lines[span.row]) for span in spans)
+    for row in range(len(lines)):
+        ordered = [span for span in spans if span.row == row]
+        assert all(
+            left.end <= right.start
+            for left, right in zip(ordered, ordered[1:], strict=False)
+        )
+
+
+def test_markdown_dispatches_json_fences_to_json_highlighting() -> None:
+    lines = ("```json", '{"ready": true}', "```")
+    spans = lexical_spans(lines, "markdown")
+    assert TextSpan(1, 1, 8, "property") in spans
+    assert TextSpan(1, 10, 14, "keyword") in spans
 
 
 def test_diff_background_ranges_are_independent_from_syntax_foreground() -> None:

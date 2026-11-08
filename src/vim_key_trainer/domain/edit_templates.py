@@ -12,6 +12,7 @@ from math import gcd
 from random import Random
 
 # Local imports
+from vim_key_trainer.domain.code_samples import CodeExcerpt
 from vim_key_trainer.domain.edit_weights import EditTechniqueWeights
 from vim_key_trainer.domain.keys import KeyToken
 
@@ -66,6 +67,7 @@ class DocumentPlan:
     goal_lines: tuple[str, ...]
     recipes: tuple[EditRecipe, ...]
     context_title: str
+    code_excerpt: CodeExcerpt | None = None
 
 
 @dataclass(frozen=True, slots=True)

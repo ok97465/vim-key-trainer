@@ -166,10 +166,21 @@ def test_aborted_attempt_persists_without_progress_or_rewards(tmp_path: Path) ->
     reopened.close()
 
 
+@pytest.mark.parametrize(
+    ("profile_id", "document_lines"),
+    [
+        ("editing_compound", 40),
+        ("code_python", 300),
+        ("code_cpp", 500),
+        ("code_json", 60),
+    ],
+)
 def test_generated_free_result_keeps_seed_length_versions_and_nonapplicable_stats(
     tmp_path: Path,
+    profile_id: str,
+    document_lines: int,
 ) -> None:
-    spec = EditPracticeSpec("editing_compound", seed=2**32 - 1, document_lines=40)
+    spec = EditPracticeSpec(profile_id, seed=2**32 - 1, document_lines=document_lines)
     lesson = create_edit_problem(spec)
     session = EditingSession(lesson, "free")
     for key in lesson.baseline:
@@ -181,6 +192,10 @@ def test_generated_free_result_keeps_seed_length_versions_and_nonapplicable_stat
     reopened = SqliteResultRepository(tmp_path / "training.sqlite3")
     result = reopened.results[0]
     assert isinstance(result, EditingSessionResult)
+    assert result == session.result
+    assert reopened.best_for(session.result) == session.result
+    assert not reopened.save(session.result)
+    assert reopened.completed_count == 1
     assert result.practice_spec == spec
     assert result.content_version == lesson.content_version
     assert result.generator_version == lesson.generator_version
@@ -193,6 +208,29 @@ def test_generated_free_result_keeps_seed_length_versions_and_nonapplicable_stat
     )
     assert reopened.best_edit_stars(lesson.id, lesson.content_version, "free") == 3
     assert reopened.best_edit_stars(lesson.id, lesson.content_version, "guided") == 0
+    reopened.close()
+
+
+def test_existing_json_practice_history_preserves_problem_signature(
+    tmp_path: Path,
+) -> None:
+    fixture = (
+        Path(__file__).resolve().parents[1]
+        / "fixtures"
+        / "legacy_code_json_result_v3.json"
+    )
+    result = decode_result(fixture.read_text(encoding="utf-8"))
+    assert isinstance(result, EditingSessionResult)
+    assert result.practice_spec == EditPracticeSpec("code_json", 2**32 - 1, 60)
+    lesson = create_edit_problem(result.practice_spec)
+    assert lesson.signature == result.lesson_signature
+    repository = SqliteResultRepository(tmp_path / "legacy.sqlite3")
+    assert repository.save(result)
+    repository.close()
+    reopened = SqliteResultRepository(tmp_path / "legacy.sqlite3")
+    assert reopened.load_issues == ()
+    assert reopened.results == (result,)
+    assert reopened.best_for(result) == result
     reopened.close()
 
 

@@ -22,6 +22,7 @@ from vim_key_trainer.services.document_problem_factory import (
 from vim_key_trainer.services.edit_problem_factory import create_edit_problem
 from vim_key_trainer.services.edit_session import EditingSession
 from vim_key_trainer.services.result_codec import (
+    RESULT_SCHEMA_VERSION,
     comparison_digest,
     decode_result,
     encode_result,
@@ -143,7 +144,7 @@ def test_weighted_generation_conditions_round_trip_through_json_and_database(
     spec = result.document_spec if document else result.practice_spec
     assert spec is not None and spec.technique_weights == weights
     encoded = encode_result(result)
-    assert json.loads(encoded)["schema_version"] == 3
+    assert json.loads(encoded)["schema_version"] == RESULT_SCHEMA_VERSION
     assert decode_result(encoded) == result
     path = tmp_path / "weights.sqlite3"
     repository = SqliteResultRepository(path)
@@ -181,7 +182,7 @@ def test_changing_only_weights_separates_personal_record_comparisons(
     assert all(repository.best_for(result) == result for result in versions)
 
 
-@pytest.mark.parametrize("schema_version", [1, 2])
+@pytest.mark.parametrize("schema_version", [1, 2, 3])
 def test_legacy_results_keep_their_original_comparison_digest_without_weights(
     unweighted_result: EditingSessionResult, schema_version: int
 ) -> None:

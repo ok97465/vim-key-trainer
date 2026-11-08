@@ -204,27 +204,39 @@ def _python_spans(lines: tuple[str, ...]) -> tuple[TextSpan, ...]:
         token.COMMENT: "comment",
         token.OP: "operator",
     }
-    try:
-        for item in tokenize.generate_tokens(
-            io.StringIO("\n".join(lines) + "\n").readline
-        ):
-            role = roles.get(item.type)
-            if item.type == token.NAME and (
-                keyword.iskeyword(item.string) or keyword.issoftkeyword(item.string)
-            ):
-                role = "keyword"
-            if role is not None:
-                spans.extend(
-                    _multiline_span(
-                        lines,
-                        (item.start[0] - 1, item.start[1]),
-                        (item.end[0] - 1, item.end[1]),
-                        role,
+    source = io.StringIO("\n".join(lines) + "\n")
+    line_starts = [0]
+    for line in lines[:-1]:
+        line_starts.append(line_starts[-1] + len(line) + 1)
+    row_offset = 0
+    while row_offset < len(lines):
+        try:
+            for item in tokenize.generate_tokens(source.readline):
+                role = roles.get(item.type)
+                if item.type == token.NAME and (
+                    keyword.iskeyword(item.string) or keyword.issoftkeyword(item.string)
+                ):
+                    role = "keyword"
+                if role is not None:
+                    spans.extend(
+                        _multiline_span(
+                            lines,
+                            (item.start[0] - 1 + row_offset, item.start[1]),
+                            (item.end[0] - 1 + row_offset, item.end[1]),
+                            role,
+                        )
                     )
-                )
-    except (tokenize.TokenError, IndentationError, SyntaxError):
-        # 입력 중인 불완전한 코드는 지금까지 읽은 토큰만 표시한다.
-        pass
+        except (IndentationError, SyntaxError) as error:
+            # 발췌의 잘못된 dedent부터 새 블록으로 읽되 이후 여러 줄 문자열의
+            # 문맥은 유지한다. 행마다 따로 읽으면 문자열 안의 코드가 색칠된다.
+            row_offset += max(1, (error.lineno or 1) - 1)
+            if row_offset < len(lines):
+                source.seek(line_starts[row_offset])
+        except tokenize.TokenError:
+            # 입력 중인 불완전한 코드는 지금까지 읽은 토큰만 표시한다.
+            break
+        else:
+            break
     return tuple(spans)
 
 
@@ -276,11 +288,32 @@ def _cpp_spans(lines: tuple[str, ...]) -> tuple[TextSpan, ...]:
     return tuple(spans)
 
 
+_JSON_TOKENS = re.compile(
+    r'(?P<property>"(?:\\.|[^"\\])*")(?=\s*:)'
+    r'|(?P<string>"(?:\\.|[^"\\])*(?:"|\\?$))'
+    r"|(?P<keyword>\b(?:true|false|null)\b)"
+    r"|(?P<number>(?<![\w.])-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?(?![\w.]))"
+    r"|(?P<operator>[{}\[\]:,])"
+)
+
+
+def _json_spans(lines: tuple[str, ...]) -> tuple[TextSpan, ...]:
+    """완전한 JSON을 요구하지 않고 편집 중인 행의 어휘만 구분한다."""
+    spans: list[TextSpan] = []
+    for row, line in enumerate(lines):
+        for match in _JSON_TOKENS.finditer(line):
+            role = match.lastgroup
+            if role is not None:
+                spans.append(TextSpan(row, match.start(), match.end(), role))
+    return tuple(spans)
+
+
 _FENCE_LANGUAGES: dict[str, DocumentLanguage] = {
     "py": "python",
     "python": "python",
     "cpp": "cpp",
     "c++": "cpp",
+    "json": "json",
 }
 
 
@@ -319,7 +352,7 @@ def _markdown_spans(lines: tuple[str, ...]) -> tuple[TextSpan, ...]:
 def lexical_spans(
     lines: tuple[str, ...], language: DocumentLanguage
 ) -> tuple[TextSpan, ...]:
-    """문자색만 반환한다. Python은 tokenize, C++은 기본 어휘 강조를 제공한다.
+    """문자색만 반환한다. Python은 tokenize, C++·JSON은 어휘 강조를 제공한다.
 
     언어 범위는 diff 배경·밑줄과 독립적이다. 파서·컴파일러나 코드를 실행하지 않는다.
     """
@@ -327,6 +360,8 @@ def lexical_spans(
         return _python_spans(lines)
     if language == "cpp":
         return _cpp_spans(lines)
+    if language == "json":
+        return _json_spans(lines)
     if language == "markdown":
         return _markdown_spans(lines)
     if language != "text":

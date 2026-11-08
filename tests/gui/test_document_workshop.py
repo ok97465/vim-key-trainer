@@ -21,7 +21,7 @@ from vim_key_trainer.domain.keys import KeyToken
 from vim_key_trainer.domain.sessions import SessionState
 from vim_key_trainer.services.result_repository import MemoryResultRepository
 from vim_key_trainer.services.sqlite_repository import SqliteResultRepository
-from vim_key_trainer.ui.edit_catalog import EditCatalogPage
+from vim_key_trainer.ui.edit_catalog import EditCategoryPage
 from vim_key_trainer.ui.main_window import MainWindow
 
 
@@ -99,8 +99,8 @@ def test_real_document_missions_complete_with_colored_targets_and_independent_re
         == 3
     )
     window.show_editing()
-    assert "문서 복구 1/" in window.editing_page.summary.text()
-    assert "첫" in window.editing_page.achievements.text()
+    assert "문서 복구 1/" in window.editing_menu_page.summary.text()
+    assert "첫" in window.editing_menu_page.achievements.text()
 
 
 def test_source_license_dialog_preserves_problem_and_requires_resume(
@@ -146,20 +146,23 @@ def test_explicit_document_gets_new_damage_and_keeps_mode(
     assert page.session.key_count == 0
 
 
-def test_document_overview_has_one_launch_instead_of_document_cards(
+def test_general_document_card_emits_one_direct_launch(
     qtbot: QtBot,
 ) -> None:
-    catalog = EditCatalogPage()
+    catalog = EditCategoryPage()
     qtbot.addWidget(catalog)
     catalog.show()
     catalog.refresh(MemoryResultRepository())
-    assert catalog.tabs.currentWidget() is catalog.mission_page
     assert not any(
-        button.objectName().startswith("mission_")
-        for button in catalog.findChildren(QPushButton)
+        control.objectName().startswith("mission_")
+        for control in catalog.findChildren(QPushButton)
     )
-    with qtbot.waitSignal(catalog.random_practice_requested):
-        qtbot.mouseClick(catalog.launch_button, Qt.MouseButton.LeftButton)
+    launch = catalog.findChild(QPushButton, "editingGeneral")
+    assert launch is not None
+    launches = []
+    catalog.general_requested.connect(lambda: launches.append(True))
+    qtbot.mouseClick(launch, Qt.MouseButton.LeftButton)
+    assert launches == [True]
     assert "웹 문서 구조대" in catalog.collection_progress.text()
 
 

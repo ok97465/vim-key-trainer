@@ -8,18 +8,22 @@ from collections.abc import Iterator
 
 # Third party imports
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import QPushButton, QWidget
 from pytestqt.qtbot import QtBot
 
 # Local imports
 from vim_key_trainer.domain.command_generator import list_command_profiles
-from vim_key_trainer.domain.edit_generator import list_edit_profiles
+from vim_key_trainer.domain.edit_generator import (
+    list_code_edit_profiles,
+    list_edit_profiles,
+)
 from vim_key_trainer.domain.exercises import EXERCISES
 from vim_key_trainer.domain.keys import KeyToken
 from vim_key_trainer.domain.sessions import SessionState
 from vim_key_trainer.services.command_session import ContinuousCommandSession
 from vim_key_trainer.ui.main_window import MainWindow
+from vim_key_trainer.ui.theme import STYLESHEET
 
 
 @pytest.fixture
@@ -137,18 +141,115 @@ def test_sidebar_switch_aborts_active_attempts_and_opens_editing_catalog(
     press_token(window, qtbot, command.expected_token)
     qtbot.mouseClick(window.editing_button, Qt.MouseButton.LeftButton)
     assert command.state == SessionState.ABORTED
-    assert window.stack.currentWidget() is window.editing_page
+    assert window.stack.currentWidget() is window.editing_menu_page
     assert window.editing_button.isChecked()
     assert not window.commands_button.isChecked()
-    assert lesson_ids(window.editing_page) == {
-        profile.id for profile in list_edit_profiles()
+    assert lesson_ids(window.editing_menu_page) == {
+        profile.id for profile in list_code_edit_profiles()
     }
-    assert window.editing_page.launch_button.isVisible()
+    click_named(window.editing_menu_page, qtbot, "editingGeneral")
+    assert window.stack.currentWidget() is window.edit_practice
+    assert window.edit_practice.session is not None
+    assert window.edit_practice.session.lesson.document_spec is not None
+    assert window.edit_practice.document_combo.isVisible()
     assert window.repository.completed_count == 0
     assert window.repository.best_stars("numbers") == 0
-    click_named(window.editing_page, qtbot, "editingToCommands")
+    qtbot.mouseClick(window.edit_practice.leave_button, Qt.MouseButton.LeftButton)
+    assert window.stack.currentWidget() is window.editing_menu_page
+    click_named(window.editing_menu_page, qtbot, "editingTechniques")
+    assert window.stack.currentWidget() is window.editing_techniques_page
+    assert lesson_ids(window.editing_techniques_page) == {
+        profile.id for profile in list_edit_profiles()
+    }
+    click_named(window.editing_techniques_page, qtbot, "lesson_editing_numbers")
+    assert window.stack.currentWidget() is window.edit_practice
+    assert window.edit_practice.session is not None
+    assert window.edit_practice.session.lesson.id == "editing_numbers"
+    qtbot.mouseClick(window.edit_practice.leave_button, Qt.MouseButton.LeftButton)
+    assert window.stack.currentWidget() is window.editing_techniques_page
+    click_named(window.editing_techniques_page, qtbot, "editingToCategories")
+    assert window.stack.currentWidget() is window.editing_menu_page
+    qtbot.mouseClick(window.commands_button, Qt.MouseButton.LeftButton)
     assert window.stack.currentWidget() is window.commands_menu_page
     assert window.commands_button.isChecked()
+
+
+@pytest.mark.parametrize("general", [True, False])
+def test_document_card_enter_respects_direct_and_technique_entry_paths(
+    window: MainWindow, qtbot: QtBot, general: bool
+) -> None:
+    window.show_editing()
+    entry = window.editing_menu_page.findChild(
+        QPushButton, "editingGeneral" if general else "editingTechniques"
+    )
+    assert entry is not None
+    entry.setFocus()
+    qtbot.keyClick(entry, Qt.Key.Key_Return)
+    if not general:
+        assert window.stack.currentWidget() is window.editing_techniques_page
+        assert window.edit_practice.session is None
+        technique = window.editing_techniques_page.findChild(
+            QPushButton, "lesson_editing_numbers"
+        )
+        assert technique is not None
+        technique.setFocus()
+        qtbot.keyClick(technique, Qt.Key.Key_Return)
+    page = window.edit_practice
+    assert window.stack.currentWidget() is page
+    session = page.session
+    assert session is not None and session.state == SessionState.READY
+    assert session.key_count == 0 and session.elapsed_seconds == 0
+    assert page.start_button.hasFocus() and not page.practice_input.isEnabled()
+    if general:
+        assert session.lesson.document_spec is not None
+        assert page.document_combo.currentData() == ""
+    else:
+        assert session.lesson.id == "editing_numbers"
+    qtbot.mouseClick(page.leave_button, Qt.MouseButton.LeftButton)
+    assert window.stack.currentWidget() is (
+        window.editing_menu_page if general else window.editing_techniques_page
+    )
+
+
+@pytest.mark.parametrize("techniques", [False, True])
+def test_document_cards_align_with_command_menu_in_two_columns(
+    window: MainWindow, qtbot: QtBot, techniques: bool
+) -> None:
+    window.setStyleSheet(STYLESHEET)
+    window.show_commands_menu()
+    reference = window.commands_menu_page.findChild(
+        QPushButton, f"lesson_{list_command_profiles()[0].id}"
+    )
+    assert reference is not None
+    qtbot.waitUntil(reference.isVisible)
+    qtbot.waitUntil(lambda: reference.height() == reference.sizeHint().height())
+    reference_card = reference.parentWidget()
+    reference_position = reference_card.mapTo(window, QPoint())
+    reference_width = reference_card.width()
+    reference_button_width = reference.width()
+    reference_button_height = reference.height()
+    if techniques:
+        window.show_technique_editing()
+        page = window.editing_techniques_page
+        names = [f"lesson_{profile.id}" for profile in list_edit_profiles()[:3]]
+    else:
+        window.show_editing()
+        page = window.editing_menu_page
+        names = ["editingGeneral", "editingTechniques", "lesson_code_python"]
+    controls = [page.findChild(QPushButton, name) for name in names]
+    assert all(control is not None for control in controls)
+    cards = [control.parentWidget() for control in controls if control is not None]
+    qtbot.waitUntil(lambda: abs(cards[0].width() - reference_width) <= 1)
+    positions = [frame.mapTo(window, QPoint()) for frame in cards]
+    assert positions[0] == reference_position
+    assert positions[1].y() == positions[0].y()
+    assert positions[1].x() > positions[0].x()
+    assert positions[2].x() == positions[0].x()
+    assert positions[2].y() > positions[0].y()
+    for control in controls:
+        assert control is not None
+        assert control.height() == reference_button_height
+        assert abs(control.width() - reference_button_width) <= 1
 
 
 def test_command_result_and_settings_return_to_command_menu(

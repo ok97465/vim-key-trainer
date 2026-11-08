@@ -8,6 +8,7 @@ from collections.abc import Iterator
 # Third party imports
 import pytest
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QPushButton
 from pytestqt.qtbot import QtBot
 
 # Local imports
@@ -32,7 +33,9 @@ def test_single_launch_selects_random_document_and_uses_smaller_editor_font(
     qtbot: QtBot,
 ) -> None:
     window.show_editing()
-    qtbot.mouseClick(window.editing_page.launch_button, Qt.MouseButton.LeftButton)
+    launch = window.editing_menu_page.findChild(QPushButton, "editingGeneral")
+    assert launch is not None
+    qtbot.mouseClick(launch, Qt.MouseButton.LeftButton)
     page = window.edit_practice
     assert window.stack.currentWidget() is page
     assert page.session is not None and page.session.lesson.document_spec is not None

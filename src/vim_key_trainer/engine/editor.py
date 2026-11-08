@@ -2133,6 +2133,8 @@ class EditEngine:
         )
 
     def _track_marks(self, before: EditorState, after: EditorState) -> None:
+        if not self._marks:
+            return
         original, changed = "\n".join(before.lines), "\n".join(after.lines)
         start, removed = self._difference(before.lines, after.lines)
         removed_length = len(removed)

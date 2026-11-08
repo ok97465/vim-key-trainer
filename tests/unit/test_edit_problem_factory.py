@@ -7,8 +7,10 @@ from dataclasses import replace
 import pytest
 
 # Local imports
+from vim_key_trainer.content.code_corpus import load_code_sources
 from vim_key_trainer.content.edit_loader import EditContentError, get_edit_lesson
 from vim_key_trainer.domain.edit_generator import (
+    CODE_SOURCE_SELECTION_VERSION,
     EDIT_GENERATOR_VERSION,
     list_edit_profiles,
 )
@@ -112,3 +114,67 @@ def test_introductory_lesson_keeps_its_previous_signature() -> None:
         lesson.signature
         == "e5764227eb962c9db1a67f94ae7b552160558b21f3d0898f9d1c0d59c4c96162"
     )
+
+
+@pytest.mark.parametrize(
+    "profile_id,line_count", [("editing_numbers", 24), ("code_json", 60)]
+)
+def test_local_document_problem_does_not_require_code_corpus(
+    monkeypatch: pytest.MonkeyPatch, profile_id: str, line_count: int
+) -> None:
+    def unavailable() -> None:
+        pytest.fail("일반 문서·JSON 연습에서 코드 코퍼스를 읽었습니다.")
+
+    monkeypatch.setattr(edit_problem_factory, "load_code_sources", unavailable)
+    assert (
+        create_edit_problem(EditPracticeSpec(profile_id, 78, line_count)).code_excerpt
+        is None
+    )
+
+
+@pytest.mark.parametrize("field", ["source", "range", "lines"])
+def test_factory_rejects_code_whose_provenance_disagrees_with_goal(
+    field: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spec = EditPracticeSpec("code_python", seed=78, document_lines=300)
+    valid = create_edit_problem(spec)
+    excerpt = valid.code_excerpt
+    assert excerpt is not None
+    if field == "source":
+        excerpt = replace(excerpt, source=replace(excerpt.source, sha256="0" * 64))
+    elif field == "range":
+        excerpt = replace(excerpt, start_line=excerpt.start_line + 1)
+    else:
+        excerpt = replace(excerpt, lines=("changed",) + excerpt.lines[1:])
+    monkeypatch.setattr(
+        edit_problem_factory,
+        "generate_edit_lesson",
+        lambda _spec, **_kwargs: replace(valid, code_excerpt=excerpt),
+    )
+    with pytest.raises(ValueError, match="출처"):
+        create_edit_problem(spec)
+
+
+def test_factory_rejects_another_registered_source_for_fixed_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    random_spec = EditPracticeSpec("code_python", seed=78, document_lines=300)
+    random_lesson = create_edit_problem(random_spec)
+    assert random_lesson.code_excerpt is not None
+    other_source = next(
+        entry.source.id
+        for entry in load_code_sources()
+        if entry.source.language == "python"
+        and entry.source.id != random_lesson.code_excerpt.source.id
+    )
+    fixed_spec = replace(random_spec, code_source_id=other_source)
+    wrong = replace(
+        random_lesson,
+        practice_spec=fixed_spec,
+        generator_version=CODE_SOURCE_SELECTION_VERSION,
+    )
+    monkeypatch.setattr(
+        edit_problem_factory, "generate_edit_lesson", lambda _spec, **_kwargs: wrong
+    )
+    with pytest.raises(ValueError, match="출처"):
+        create_edit_problem(fixed_spec)

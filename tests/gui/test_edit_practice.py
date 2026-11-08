@@ -138,8 +138,10 @@ def test_preparation_selects_mode_and_does_not_start_clock(
     window: MainWindow,
     qtbot: QtBot,
 ) -> None:
-    window.show_editing()
-    lesson_button = window.editing_page.findChild(QPushButton, "lesson_editing_numbers")
+    window.show_technique_editing()
+    lesson_button = window.editing_techniques_page.findChild(
+        QPushButton, "lesson_editing_numbers"
+    )
     assert lesson_button is not None
     qtbot.mouseClick(lesson_button, Qt.MouseButton.LeftButton)
     page = window.edit_practice
@@ -391,7 +393,7 @@ def test_focus_loss_pause_and_catalogs_keep_edit_records_separate(
     qtbot.keyClicks(page.practice_input, "xi8")
     qtbot.keyClick(page.practice_input, Qt.Key.Key_Escape)
     window.show_editing()
-    assert "완료 1회" in window.editing_summary.text()
+    assert "완료 1회" in window.editing_menu_page.summary.text()
     assert "완료 0회" in window.commands_summary.text()
     assert "완료 0회" in window.home_summary.text()
     assert window.repository.best_edit_stars("editing_numbers", 1, "guided") == 0

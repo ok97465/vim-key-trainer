@@ -3,4 +3,4 @@
 # Standard library imports
 from typing import Literal
 
-DocumentLanguage = Literal["text", "markdown", "python", "cpp"]
+DocumentLanguage = Literal["text", "markdown", "python", "cpp", "json"]

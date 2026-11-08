@@ -31,11 +31,16 @@ from vim_key_trainer.domain.command_generator import (
 )
 from vim_key_trainer.domain.commands import CommandSpec
 from vim_key_trainer.domain.document_missions import DocumentPracticeSpec
+from vim_key_trainer.domain.edit_generator import get_edit_profile
 from vim_key_trainer.domain.edit_weights import (
     EDIT_TECHNIQUES,
     EditTechniqueWeights,
 )
-from vim_key_trainer.domain.editing import EditLesson, EditPracticeSpec
+from vim_key_trainer.domain.editing import (
+    EditLesson,
+    EditPracticeSpec,
+    random_edit_document_lines,
+)
 from vim_key_trainer.domain.exercises import EXERCISES, PracticeSpec
 from vim_key_trainer.domain.sessions import (
     CommandSessionResult,
@@ -55,7 +60,7 @@ from vim_key_trainer.services.session_service import PracticeSession
 from vim_key_trainer.ui.branding import AUTHOR, WINDOW_TITLE, load_icon
 from vim_key_trainer.ui.command_practice import CommandPracticePage
 from vim_key_trainer.ui.components import button, label, scroll_page
-from vim_key_trainer.ui.edit_catalog import EditCatalogPage
+from vim_key_trainer.ui.edit_catalog import EditCategoryPage, EditTechniquePage
 from vim_key_trainer.ui.edit_practice import EditPracticePage
 from vim_key_trainer.ui.qt_input import IGNORED_INPUT_MESSAGES, NormalizedKey
 from vim_key_trainer.ui.vim_cheatsheet import VimCheatSheetPage
@@ -112,21 +117,20 @@ class MainWindow(QMainWindow):
         shell.addWidget(self.stack, 1)
         self.numbers_page = self._make_numbers_menu()
         self.commands_menu_page = self._make_commands_menu()
-        self.editing_page = EditCatalogPage()
-        self.editing_page.practice_requested.connect(self.prepare_editing)
-        self.editing_page.random_practice_requested.connect(
-            self.prepare_random_document
-        )
-        self.editing_page.numbers_requested.connect(self.show_numbers)
-        self.editing_page.commands_requested.connect(self.show_commands_menu)
-        self.editing_summary = self.editing_page.summary
+        self.editing_menu_page = EditCategoryPage()
+        self.editing_menu_page.general_requested.connect(self.show_general_editing)
+        self.editing_menu_page.techniques_requested.connect(self.show_technique_editing)
+        self.editing_menu_page.practice_requested.connect(self.prepare_editing)
+        self.editing_techniques_page = EditTechniquePage()
+        self.editing_techniques_page.practice_requested.connect(self.prepare_editing)
+        self.editing_techniques_page.categories_requested.connect(self.show_editing)
         self.practice_page = self._make_practice()
         self.command_page = CommandPracticePage(self.repository)
         self.command_page.leave_requested.connect(self.show_commands_menu)
         self.edit_practice = EditPracticePage(
             self.repository, technique_weights=self._edit_weights
         )
-        self.edit_practice.leave_requested.connect(self.show_editing)
+        self.edit_practice.leave_requested.connect(self._leave_editing)
         self.result_page = self._make_result()
         self.diagnostic_page = self._make_diagnostics()
         self.settings_page = self._make_settings()
@@ -135,7 +139,8 @@ class MainWindow(QMainWindow):
         for page in (
             self.numbers_page,
             self.commands_menu_page,
-            self.editing_page,
+            self.editing_menu_page,
+            self.editing_techniques_page,
             self.practice_page,
             self.command_page,
             self.edit_practice,
@@ -712,7 +717,8 @@ class MainWindow(QMainWindow):
         )
         self.home_summary.setText(f"학습 완료 {number_count}회")
         self.commands_summary.setText(f"학습 완료 {command_count}회")
-        self.editing_page.refresh(self.repository)
+        self.editing_menu_page.refresh(self.repository)
+        self.editing_techniques_page.refresh(self.repository)
         for exercise_id, widget in self._lesson_stars.items():
             stars = self.repository.best_stars(exercise_id)
             widget.setText("★" * stars + "☆" * (3 - stars))
@@ -737,10 +743,28 @@ class MainWindow(QMainWindow):
 
     def show_editing(self) -> None:
         self._category = "editing"
-        self._navigate(self.editing_page)
+        self._navigate(self.editing_menu_page)
         self.editing_button.setChecked(True)
         self.editing_button.setFocus(Qt.FocusReason.OtherFocusReason)
         self._refresh_catalogs()
+
+    def show_general_editing(self) -> None:
+        self.prepare_random_document()
+
+    def show_technique_editing(self) -> None:
+        self._category = "editing"
+        self._navigate(self.editing_techniques_page)
+        self.editing_button.setChecked(True)
+        self.editing_button.setFocus(Qt.FocusReason.OtherFocusReason)
+        self._refresh_catalogs()
+
+    def _leave_editing(self) -> None:
+        session = self.edit_practice.session
+        spec = session.lesson.practice_spec if session is not None else None
+        if spec is not None and get_edit_profile(spec.profile_id).language == "text":
+            self.show_technique_editing()
+        else:
+            self.show_editing()
 
     def show_diagnostics(self) -> None:
         self._navigate(self.diagnostic_page)
@@ -765,7 +789,14 @@ class MainWindow(QMainWindow):
         )
         navigation = (
             (self.commands_button, (self.commands_menu_page, self.command_page)),
-            (self.editing_button, (self.editing_page, self.edit_practice)),
+            (
+                self.editing_button,
+                (
+                    self.editing_menu_page,
+                    self.editing_techniques_page,
+                    self.edit_practice,
+                ),
+            ),
             (self.settings_button, (self.settings_page,)),
             (self.diagnostic_button, (self.diagnostic_page,)),
         )
@@ -887,9 +918,11 @@ class MainWindow(QMainWindow):
             raise ValueError("선택한 유형과 문제 생성 조건이 다릅니다.")
         try:
             if spec is None:
+                seed = randbelow(2**32)
                 spec = EditPracticeSpec(
                     profile_id,
-                    seed=randbelow(2**32),
+                    seed=seed,
+                    document_lines=random_edit_document_lines(profile_id, seed),
                     technique_weights=self._edit_weights(),
                 )
             lesson = create_edit_problem(spec)

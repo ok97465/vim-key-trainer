@@ -31,6 +31,7 @@ from vim_key_trainer.ui.widgets.practice_input import PracticeInput
 _SYNTAX_COLORS = {
     "keyword": "#cda9ef",
     "string": "#b9de91",
+    "property": "#86c9e8",
     "number": "#f3bc82",
     "comment": "#8fa0ad",
     "operator": "#86c9e8",

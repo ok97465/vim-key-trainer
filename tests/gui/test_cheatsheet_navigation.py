@@ -167,7 +167,7 @@ def test_sidebar_places_reference_after_editing_and_restores_catalog(
     window.show_editing()
     qtbot.mouseClick(window.cheatsheet_button, Qt.MouseButton.LeftButton)
     qtbot.mouseClick(window.cheatsheet_page.return_button, Qt.MouseButton.LeftButton)
-    assert window.stack.currentWidget() is window.editing_page
+    assert window.stack.currentWidget() is window.editing_menu_page
     assert window.editing_button.isChecked()
     assert not window.cheatsheet_button.isChecked()
 

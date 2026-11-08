@@ -22,8 +22,8 @@ from vim_key_trainer.domain.sessions import (
 )
 from vim_key_trainer.services.result_comparison import comparison_key
 
-RESULT_SCHEMA_VERSION = 3
-_READABLE_SCHEMA_VERSIONS = frozenset({1, 2, RESULT_SCHEMA_VERSION})
+RESULT_SCHEMA_VERSION = 4
+_READABLE_SCHEMA_VERSIONS = frozenset({1, 2, 3, RESULT_SCHEMA_VERSION})
 ResultKind = Literal["symbols", "commands", "editing"]
 
 
@@ -56,7 +56,7 @@ def _json_value(value: object) -> object:
         return {
             field.name: _json_value(getattr(value, field.name))
             for field in fields(value)
-            if field.name != "technique_weights"
+            if field.name not in {"technique_weights", "code_source_id"}
             or getattr(value, field.name) is not None
         }
     if isinstance(value, Mapping):
@@ -137,6 +137,10 @@ def _validate_statistics(result: StoredResult) -> None:
         if result.practice_spec is not None and (
             result.practice_spec.profile_id != result.lesson_id
             or result.generator_version < 1
+            or (
+                result.practice_spec.code_source_id is not None
+                and result.generator_version < 4
+            )
         ):
             raise ValueError("편집 생성 조건이 결과의 레슨·버전과 다릅니다.")
         if result.document_spec is not None and (
@@ -228,6 +232,13 @@ def decode_result(payload: str) -> StoredResult:
         )
     ):
         raise ValueError("기술 비중 생성 조건에는 결과 JSON 버전 3이 필요합니다.")
+    specification = envelope.data.get("practice_spec")
+    if (
+        envelope.schema_version < 4
+        and isinstance(specification, dict)
+        and "code_source_id" in specification
+    ):
+        raise ValueError("코드 문서 선택 조건에는 결과 JSON 버전 4가 필요합니다.")
     result = cast(
         StoredResult,
         _ADAPTERS[envelope.kind].validate_json(_dumps(envelope.data), strict=True),

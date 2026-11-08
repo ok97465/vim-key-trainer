@@ -559,6 +559,25 @@ def test_mark_follows_its_line_when_an_earlier_line_is_deleted() -> None:
     assert engine.state.lines[engine.state.row] == "two"
 
 
+def test_large_unmarked_buffer_edits_skip_full_document_difference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lines = tuple(f"item_{row} = 10" for row in range(500))
+    engine = EditEngine(EditorState(lines, row=450))
+
+    def forbid_full_scan(*_args: object) -> None:
+        pytest.fail("마크 없는 입력에서 문서 전체 차이를 계산했습니다.")
+
+    monkeypatch.setattr(EditEngine, "_difference", forbid_full_scan)
+    type_keys(engine, "A # updated")
+    assert engine.submit(ESC).accepted
+    assert engine.state.lines[450] == lines[450] + " # updated"
+    type_keys(engine, "u")
+    assert engine.state.lines == lines
+    chord(engine, "r")
+    assert engine.state.lines[450] == lines[450] + " # updated"
+
+
 def test_counted_replace_past_line_end_is_an_unchanged_command() -> None:
     engine = EditEngine(EditorState(("abcd",), column=2))
     type_keys(engine, "3rX")

@@ -1,4 +1,4 @@
-"""손상 seed 기록과 결과 JSON v1·v2·v3 호환성을 검증한다."""
+"""손상 seed 기록과 결과 JSON 버전 간 호환성을 검증한다."""
 
 # Standard library imports
 import hashlib
@@ -109,7 +109,7 @@ def test_document_metadata_survives_session_json_and_database_reopen(
     assert result.practice_spec is None
     assert result.generator_version == 1
     encoded = encode_result(result)
-    assert json.loads(encoded)["schema_version"] == RESULT_SCHEMA_VERSION == 3
+    assert json.loads(encoded)["schema_version"] == RESULT_SCHEMA_VERSION == 4
     assert decode_result(encoded) == result
     path = tmp_path / "records.sqlite3"
     repository = SqliteResultRepository(path)
@@ -124,9 +124,11 @@ def test_document_metadata_survives_session_json_and_database_reopen(
 
 
 @pytest.mark.parametrize("generated", [False, True])
-def test_v1_database_records_keep_comparison_index_and_original_payload(
+@pytest.mark.parametrize("schema_version", [1, 2, 3])
+def test_legacy_database_records_keep_comparison_index_and_original_payload(
     tmp_path: Path,
     generated: bool,
+    schema_version: int,
 ) -> None:
     if generated:
         lesson = create_edit_problem(EditPracticeSpec("editing_numbers", 81, 24))
@@ -141,8 +143,9 @@ def test_v1_database_records_keep_comparison_index_and_original_payload(
     old_digest = legacy_comparison_digest(result)
     assert comparison_digest(result) == old_digest
     old_payload = json.loads(encode_result(result))
-    old_payload["schema_version"] = 1
-    old_payload["data"].pop("document_spec")
+    old_payload["schema_version"] = schema_version
+    if schema_version == 1:
+        old_payload["data"].pop("document_spec")
     serialized = json.dumps(old_payload)
     assert decode_result(serialized) == result
     path = tmp_path / "legacy.sqlite3"

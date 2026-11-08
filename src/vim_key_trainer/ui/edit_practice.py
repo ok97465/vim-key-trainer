@@ -24,21 +24,25 @@ from PySide6.QtWidgets import (
 )
 
 # Local imports
+from vim_key_trainer.content.code_corpus import load_code_sources, read_code_license
 from vim_key_trainer.content.document_missions import (
     get_document_mission,
     list_document_missions,
     read_document_license,
 )
+from vim_key_trainer.domain.document_display import compare_documents
 from vim_key_trainer.domain.document_missions import (
     DocumentMission,
     DocumentPracticeSpec,
 )
+from vim_key_trainer.domain.document_types import DocumentLanguage
+from vim_key_trainer.domain.edit_generator import EditProfile, get_edit_profile
 from vim_key_trainer.domain.edit_weights import EditTechniqueWeights
 from vim_key_trainer.domain.editing import (
-    EDIT_DOCUMENT_LENGTHS,
     EditLesson,
     EditMode,
     EditPracticeSpec,
+    random_edit_document_lines,
 )
 from vim_key_trainer.domain.sessions import (
     EditingSessionResult,
@@ -78,6 +82,10 @@ class EditPracticePage(QWidget):
         self._mission: DocumentMission | None = None
         self._random_documents = False
         self._documents = list_document_missions()
+        try:
+            self._code_sources = load_code_sources()
+        except (ValueError, OSError):
+            self._code_sources = ()
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         self.stack = QStackedWidget()
@@ -104,6 +112,14 @@ class EditPracticePage(QWidget):
         )
         self.description.setMaximumHeight(32)
         layout.addWidget(self.description)
+        self.code_source_summary = label("", "muted", wrap=True)
+        self.code_source_summary.setAccessibleName("코드 원문 출처")
+        self.code_source_summary.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        self.code_source_summary.setMaximumHeight(32)
+        self.code_source_summary.hide()
+        layout.addWidget(self.code_source_summary)
         self.mission_progress = label("", "eyebrow", wrap=True)
         self.mission_progress.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
@@ -155,18 +171,10 @@ class EditPracticePage(QWidget):
         self.document_combo.setSizeAdjustPolicy(
             QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
         )
-        self.document_combo.addItem("무작위 문서", "")
-        for document in self._documents:
-            self.document_combo.addItem(document.title, document.id)
         self.document_combo.currentIndexChanged.connect(self._document_changed)
         options.addWidget(self.document_combo, 1)
         self.length_combo = QComboBox()
         self.length_combo.setAccessibleName("편집 문서 길이")
-        for lines, title in zip(
-            EDIT_DOCUMENT_LENGTHS, ("짧게", "보통", "길게"), strict=True
-        ):
-            self.length_combo.addItem(f"{title} · {lines}줄", lines)
-        self.length_combo.setCurrentIndex(1)
         self.length_combo.currentIndexChanged.connect(self._length_changed)
         options.addWidget(self.length_combo)
         self.document_font_spin = QSpinBox()
@@ -299,16 +307,19 @@ class EditPracticePage(QWidget):
                 if lesson.id.startswith("mission_")
                 else None
             )
-            if lesson.practice_spec is not None:
-                spec = lesson.practice_spec
-                if spec.document_lines > 12:
+            spec = lesson.practice_spec
+            profile = get_edit_profile(spec.profile_id) if spec is not None else None
+            if spec is not None and profile is not None and profile.language == "text":
+                if spec.document_lines > profile.document_lengths[0]:
                     self._return_spec = spec
                 elif (
                     self._return_spec is None
                     or self._return_spec.profile_id != spec.profile_id
                     or self._return_spec.seed != spec.seed
                 ):
-                    self._return_spec = replace(spec, document_lines=24)
+                    self._return_spec = replace(
+                        spec, document_lines=profile.default_document_lines
+                    )
             if random_document is not None:
                 self._random_documents = random_document
             if self._mission is None:
@@ -317,12 +328,15 @@ class EditPracticePage(QWidget):
                 with QSignalBlocker(self.document_font_spin):
                     self.document_font_spin.setValue(font_size)
             self._show_problem_summary(lesson)
-            self._reset_options(lesson, mode)
-            self._reset_controls(lesson, mode)
+            self._reset_options(lesson, mode, profile)
+            self._reset_controls(lesson, mode, profile)
             self.comparison.set_font_size(self.document_font_spin.value())
-            self.comparison.set_language(
-                self._mission.language if self._mission else "text"
-            )
+            language: DocumentLanguage = "text"
+            if self._mission is not None:
+                language = self._mission.language
+            elif profile is not None:
+                language = profile.language
+            self.comparison.set_language(language)
             self.comparison.set_paused(False)
             self.comparison.show_documents(
                 lesson.initial, EditorState(lesson.goal_lines)
@@ -338,13 +352,33 @@ class EditPracticePage(QWidget):
     def _show_problem_summary(self, lesson: EditLesson) -> None:
         self.title.setText(lesson.title)
         self.description.setText(lesson.description)
+        excerpt = lesson.code_excerpt
+        self.code_source_summary.setVisible(excerpt is not None)
+        if excerpt is not None:
+            source = excerpt.source
+            spec = lesson.practice_spec
+            self.code_source_summary.setText(
+                f"{source.project} · {source.title} · "
+                f"원문 {excerpt.start_line}~{excerpt.end_line}행"
+            )
+            self.code_source_summary.setToolTip(
+                f"{source.url}\n고정 버전 {source.revision}\n"
+                + (
+                    "다른 문제에서도 선택한 코드 문서를 유지하고 "
+                    "발췌 구간·손상을 바꿉니다."
+                    if spec is not None and spec.code_source_id is not None
+                    else "다른 문제에서 프로젝트·발췌 구간·손상이 새로 선택됩니다."
+                )
+            )
         if lesson.goal_cursor is not None:
             row, column = lesson.goal_cursor
             self.description.setText(
                 self.description.text() + f" · 완료 커서 {row + 1}행 {column + 1}열"
             )
 
-    def _reset_options(self, lesson: EditLesson, mode: EditMode) -> None:
+    def _reset_options(
+        self, lesson: EditLesson, mode: EditMode, profile: EditProfile | None
+    ) -> None:
         with QSignalBlocker(self.mode_combo):
             self.mode_combo.setCurrentIndex(0 if mode == "guided" else 1)
             model = self.mode_combo.model()
@@ -353,21 +387,48 @@ class EditPracticePage(QWidget):
             self.mode_combo.setEnabled(True)
         spec = lesson.practice_spec
         with QSignalBlocker(self.length_combo):
-            if spec is not None:
+            self.length_combo.clear()
+            if spec is not None and profile is not None and profile.language == "text":
+                for lines, title in zip(
+                    profile.document_lengths, ("짧게", "보통", "길게"), strict=True
+                ):
+                    self.length_combo.addItem(f"{title} · {lines}줄", lines)
                 self.length_combo.setCurrentIndex(
                     self.length_combo.findData(spec.document_lines)
                 )
-            self.length_combo.setEnabled(spec is not None)
-            self.length_combo.setVisible(spec is not None)
+            adjustable = spec is not None and self.length_combo.count() > 1
+            self.length_combo.setEnabled(adjustable)
+            self.length_combo.setVisible(adjustable)
         with QSignalBlocker(self.document_combo):
-            selected = "" if self._random_documents else lesson.id
+            self.document_combo.clear()
+            if self._mission is not None:
+                self.document_combo.setAccessibleName("연습 문서 선택")
+                self.document_combo.addItem("무작위 문서", "")
+                for document in self._documents:
+                    self.document_combo.addItem(document.title, document.id)
+                selected = "" if self._random_documents else lesson.id
+            elif lesson.code_excerpt is not None and spec is not None:
+                self.document_combo.setAccessibleName("연습 코드 문서 선택")
+                self.document_combo.addItem("무작위 코드 문서", "")
+                for entry in self._code_sources:
+                    source = entry.source
+                    if source.language == lesson.code_excerpt.source.language:
+                        self.document_combo.addItem(
+                            f"{source.project} · {source.title}", source.id
+                        )
+                selected = spec.code_source_id or ""
+            else:
+                selected = ""
             self.document_combo.setCurrentIndex(
                 max(0, self.document_combo.findData(selected))
             )
-            self.document_combo.setVisible(self._mission is not None)
-            self.document_combo.setEnabled(self._mission is not None)
+            selectable = self._mission is not None or lesson.code_excerpt is not None
+            self.document_combo.setVisible(selectable)
+            self.document_combo.setEnabled(selectable)
 
-    def _reset_controls(self, lesson: EditLesson, mode: EditMode) -> None:
+    def _reset_controls(
+        self, lesson: EditLesson, mode: EditMode, profile: EditProfile | None
+    ) -> None:
         self.start_button.show()
         self.pause_button.setText("일시정지")
         self.pause_button.setEnabled(False)
@@ -376,12 +437,18 @@ class EditPracticePage(QWidget):
         generated = lesson.practice_spec is not None
         self.new_problem_button.setEnabled(generated or self._mission is not None)
         self.result_new_button.setEnabled(generated or self._mission is not None)
-        self.short_button.setVisible(generated)
         spec = lesson.practice_spec
+        self.short_button.setVisible(profile is not None and profile.language == "text")
         self.short_button.setText(
-            "짧게 7곳 연습" if spec and spec.document_lines > 12 else "긴 문서 연습"
+            "짧게 7곳 연습"
+            if spec is not None
+            and profile is not None
+            and spec.document_lines > profile.document_lengths[0]
+            else "긴 문서 연습"
         )
-        self.source_button.setVisible(self._mission is not None)
+        self.source_button.setVisible(
+            self._mission is not None or lesson.code_excerpt is not None
+        )
 
     def _mode_changed(self) -> None:
         if self.session is not None and not self._started:
@@ -410,7 +477,10 @@ class EditPracticePage(QWidget):
 
     def _document_changed(self) -> None:
         session = self.session
-        if self._switching or session is None or self._mission is None:
+        if self._switching or session is None:
+            return
+        if self._mission is None:
+            self._code_document_changed(session)
             return
         try:
             selection = str(self.document_combo.currentData())
@@ -432,7 +502,31 @@ class EditPracticePage(QWidget):
             selected = "" if self._random_documents else self._mission.id
             self.document_combo.setCurrentIndex(self.document_combo.findData(selected))
 
-    def _show_problem_error(self, error: ValueError) -> None:
+    def _code_document_changed(self, session: EditingSession) -> None:
+        previous = session.lesson.practice_spec
+        if previous is None or session.lesson.code_excerpt is None:
+            return
+        try:
+            selection = str(self.document_combo.currentData()) or None
+            seed = self._fresh_seed(previous.seed)
+            spec = replace(
+                previous,
+                seed=seed,
+                document_lines=random_edit_document_lines(previous.profile_id, seed),
+                technique_weights=self._new_technique_weights(),
+                code_source_id=selection,
+            )
+        except ValueError as error:
+            self._show_problem_error(error)
+        else:
+            if self._prepare_generated_problem(spec):
+                return
+        with QSignalBlocker(self.document_combo):
+            self.document_combo.setCurrentIndex(
+                self.document_combo.findData(previous.code_source_id or "")
+            )
+
+    def _show_problem_error(self, error: ValueError | OSError) -> None:
         note = (
             self.result_note
             if self.stack.currentWidget() is self.result_page
@@ -473,7 +567,7 @@ class EditPracticePage(QWidget):
                 if isinstance(spec, EditPracticeSpec)
                 else create_random_document_problem(spec)
             )
-        except ValueError as error:
+        except (ValueError, OSError) as error:
             self._show_problem_error(error)
             return False
         mode = session.mode if lesson.free_enabled else "guided"
@@ -543,13 +637,39 @@ class EditPracticePage(QWidget):
         if self.session is None:
             return
         self.comparison.show_current(
-            self.session.engine.state, follow_viewport=self._started
+            self.session.engine.state,
+            follow_viewport=self._started,
+            goal_position=self._guide_goal_position(),
         )
         self.command_prompt.setText(self.session.engine.state.command_line)
         self.command_prompt.setVisible(bool(self.session.engine.state.command_line))
         self._show_repair_progress(self.comparison.remaining_changes)
         self._refresh_guide()
         self._refresh_metrics()
+
+    def _guide_goal_position(self) -> tuple[int, int] | None:
+        session = self.session
+        if (
+            session is None
+            or session.mode != "guided"
+            or session.lesson.practice_spec is None
+            or not session.lesson.id.startswith("code_")
+        ):
+            return None
+        # 코드는 단계 종료 시 줄 수를 유지한다. 현재 입력 중의 dd·p 사이에는
+        # 줄 수가 달라질 수 있으므로 검증된 단계 경계에서 다음 수정 위치를 찾는다.
+        before = (
+            session.lesson.initial.lines
+            if session.step_index == 0
+            else session.lesson.guide[session.step_index - 1].expected.lines
+        )
+        for step in session.lesson.guide[session.step_index :]:
+            if before != step.expected.lines:
+                change = compare_documents(before, step.expected.lines)
+                span = change.goal_spans[0]
+                return span.row, span.start
+            before = step.expected.lines
+        return None
 
     def _show_repair_progress(self, remaining: int) -> None:
         spec = self.session.lesson.document_spec if self.session else None
@@ -696,10 +816,17 @@ class EditPracticePage(QWidget):
         if session is None or session.lesson.practice_spec is None:
             return
         spec = session.lesson.practice_spec
+        profile = get_edit_profile(spec.profile_id)
+        if profile.language != "text":
+            return
         lines = (
-            12
-            if spec.document_lines > 12
-            else (self._return_spec.document_lines if self._return_spec else 24)
+            profile.document_lengths[0]
+            if spec.document_lines > profile.document_lengths[0]
+            else (
+                self._return_spec.document_lines
+                if self._return_spec
+                else profile.default_document_lines
+            )
         )
         self._prepare_generated_problem(replace(spec, document_lines=lines))
 
@@ -730,10 +857,16 @@ class EditPracticePage(QWidget):
         if session.lesson.practice_spec is None:
             return
         previous = session.lesson.practice_spec
+        seed = self._fresh_seed(previous.seed)
         self._prepare_generated_problem(
             replace(
                 previous,
-                seed=self._fresh_seed(previous.seed),
+                seed=seed,
+                document_lines=(
+                    previous.document_lines
+                    if get_edit_profile(previous.profile_id).language == "text"
+                    else random_edit_document_lines(previous.profile_id, seed)
+                ),
                 technique_weights=weights,
             )
         )
@@ -749,11 +882,24 @@ class EditPracticePage(QWidget):
         return None
 
     def show_source(self) -> None:
-        if self._mission is None:
+        excerpt = self.session.lesson.code_excerpt if self.session else None
+        if self._mission is not None:
+            source = self._mission.source
+        elif excerpt is not None:
+            source = excerpt.source
+        else:
+            return
+        try:
+            license_text = (
+                read_code_license(source.id)
+                if excerpt is not None
+                else read_document_license(source.id)
+            )
+        except (ValueError, OSError) as error:
+            self._show_problem_error(error)
             return
         self._close_source_dialog()
         self.pause()
-        source = self._mission.source
         dialog = QDialog(self)
         dialog.setWindowTitle("문서 출처와 라이선스")
         dialog.resize(680, 500)
@@ -762,13 +908,19 @@ class EditPracticePage(QWidget):
             label(
                 f"{source.project} · {source.title}\n{source.url}\n"
                 f"라이선스 {source.license_id}\n고정 버전 {source.revision}\n"
-                f"원문 SHA-256 {source.sha256}",
+                f"원문 SHA-256 {source.sha256}\n"
+                + (
+                    f"발췌 {excerpt.start_line}~{excerpt.end_line}행\n"
+                    if excerpt is not None
+                    else ""
+                )
+                + f"표시 변환: {source.transformation}",
                 "muted",
                 wrap=True,
             )
         )
         license_view = QTextBrowser()
-        license_view.setPlainText(read_document_license(source.id))
+        license_view.setPlainText(license_text)
         layout.addWidget(license_view, 1)
         actions = QHBoxLayout()
         original = button("웹에서 원문 보기", "openOriginalDocument")

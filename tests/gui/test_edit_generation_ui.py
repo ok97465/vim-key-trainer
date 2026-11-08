@@ -58,9 +58,10 @@ def test_catalog_prepares_full_document_with_default_length(
     window: MainWindow,
     qtbot: QtBot,
 ) -> None:
-    window.show_editing()
-    window.editing_page.select_techniques()
-    start = window.editing_page.findChild(QPushButton, "lesson_editing_numbers")
+    window.show_technique_editing()
+    start = window.editing_techniques_page.findChild(
+        QPushButton, "lesson_editing_numbers"
+    )
     assert start is not None
     qtbot.mouseClick(start, Qt.MouseButton.LeftButton)
     page = window.edit_practice

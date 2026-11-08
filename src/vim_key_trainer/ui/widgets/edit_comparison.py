@@ -41,18 +41,18 @@ class EditComparison(QWidget):
         self._goal_position: tuple[int, int] | None = None
         self.current_scroll = self._scroll_area(self.practice_input)
         self.goal_scroll = self._scroll_area(self.goal_document)
+        self.goal_heading = label("목표 문서 · 수정 위치 강조", "muted")
         self.guide_overlay = EditGuideOverlay(self.current_scroll.viewport())
         self.current_scroll.viewport().installEventFilter(self)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)
-        for title, area in (
-            ("현재 문서", self.current_scroll),
-            ("목표 문서 · 수정 위치 강조", self.goal_scroll),
+        for heading, area in (
+            (label("현재 문서", "muted"), self.current_scroll),
+            (self.goal_heading, self.goal_scroll),
         ):
             column = QVBoxLayout()
             column.setSpacing(4)
-            heading = label(title, "muted")
             heading.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
             )
@@ -104,7 +104,11 @@ class EditComparison(QWidget):
         )
 
     def show_current(
-        self, state: EditorState, *, follow_viewport: bool = False
+        self,
+        state: EditorState,
+        *,
+        follow_viewport: bool = False,
+        goal_position: tuple[int, int] | None = None,
     ) -> None:
         self.practice_input.set_viewport_height(self.current_scroll.viewport().height())
         self.practice_input.show_state(state)
@@ -115,7 +119,6 @@ class EditComparison(QWidget):
         self._apply_highlights()
         if previous_count != self.remaining_changes:
             self.changes_changed.emit(self.remaining_changes)
-        cursor = self.practice_input.cursor_rect
         if follow_viewport:
             self.current_scroll.verticalScrollBar().setValue(
                 round(
@@ -124,18 +127,34 @@ class EditComparison(QWidget):
                 )
             )
         self._ensure_cursor_visible()
-        goal_position = (self.diff.goal_rows[state.row], state.column)
+        self.goal_heading.setText(
+            f"목표 문서 · 이번 수정 {goal_position[0] + 1}행"
+            if goal_position is not None
+            else "목표 문서 · 수정 위치 강조"
+        )
+        goal_position = goal_position or (self.diff.goal_rows[state.row], state.column)
         if goal_position != self._goal_position:
             # 오타·대기 명령의 갱신은 사용자가 따로 스크롤한 목표를 되돌리지 않는다.
-            goal_row, _ = goal_position
-            metrics = self.goal_document.document_metrics
-            self.goal_scroll.ensureVisible(
-                int(cursor.center().x()),
-                int(16 + (goal_row + 0.5) * metrics.lineSpacing()),
-                24,
-                24,
-            )
             self._goal_position = goal_position
+            self._ensure_goal_visible()
+
+    def _ensure_goal_visible(self) -> None:
+        if self._goal_position is None:
+            return
+        row, column = self._goal_position
+        line = self.goal_document.editor_state.lines[row]
+        metrics = self.goal_document.document_metrics
+        x = (
+            58
+            + metrics.horizontalAdvance(line[:column])
+            + metrics.horizontalAdvance(line[column : column + 1] or " ") / 2
+        )
+        self.goal_scroll.ensureVisible(
+            round(x),
+            round(16 + (row + 0.5) * metrics.lineSpacing()),
+            24,
+            24,
+        )
 
     @property
     def remaining_changes(self) -> int:
@@ -155,6 +174,7 @@ class EditComparison(QWidget):
             document.show_state(document.editor_state)
         self._apply_highlights()
         self._ensure_cursor_visible()
+        self._ensure_goal_visible()
 
     def _ensure_cursor_visible(self) -> None:
         clearance = self._guide_clearance
@@ -176,7 +196,11 @@ class EditComparison(QWidget):
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         # The scroll area's layout has its new height after this resize event.
-        QTimer.singleShot(0, self._ensure_cursor_visible)
+        QTimer.singleShot(0, self._ensure_views_visible)
+
+    def _ensure_views_visible(self) -> None:
+        self._ensure_cursor_visible()
+        self._ensure_goal_visible()
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         if isinstance(event, QResizeEvent):
