@@ -233,7 +233,7 @@ def test_same_seed_reproduces_item_order_and_retry_gets_new_attempt_id() -> None
         CommandSession(content, CommandSpec("different"))
 
 
-def test_records_are_idempotent_and_isolate_versions_and_boundaries() -> None:
+def test_records_are_idempotent_and_isolate_content_boundaries() -> None:
     clock = Clock()
     content = lesson(characters("dd"), characters("gg"))
     repository = MemoryResultRepository()
@@ -244,9 +244,8 @@ def test_records_are_idempotent_and_isolate_versions_and_boundaries() -> None:
     assert repository.save(first)
     assert not repository.save(first)
     assert repository.completed_count == 1
-    assert repository.best_command_stars(content.id, content.content_version) == 3
+    assert repository.best_command_stars(content.id) == 3
     for other_content in (
-        replace(content, content_version=2),
         replace(content, items=lesson(characters("d"), characters("dgg")).items),
         replace(
             content,
@@ -259,7 +258,7 @@ def test_records_are_idempotent_and_isolate_versions_and_boundaries() -> None:
         assert repository.best_for(changed.result) is None
         assert repository.save(changed.result)
     assert repository.best_for(first) == first
-    assert repository.completed_count == 4
+    assert repository.completed_count == 3
 
 
 def test_command_best_prefers_accuracy_then_time_and_separates_pause_usage() -> None:
@@ -295,32 +294,25 @@ def test_command_best_prefers_accuracy_then_time_and_separates_pause_usage() -> 
     assert repository.best_for(paused) == paused
 
 
-def test_command_stars_separate_content_and_game_rules_versions() -> None:
+def test_command_stars_never_decrease_and_stay_separate_from_symbols() -> None:
     repository = MemoryResultRepository()
     content = lesson(characters("dd"))
     original = CommandSession(content)
     complete(original)
     assert original.result is not None
     assert repository.save(original.result)
-    assert repository.best_command_stars(content.id, 1) == 3
-    assert repository.best_command_stars(content.id, 2) == 0
-    assert repository.best_command_stars(content.id, 1, game_rules_version=2) == 0
+    assert repository.best_command_stars(content.id) == 3
     assert repository.best_stars(content.id) == 0
 
-    updated = CommandSession(replace(content, content_version=2))
-    updated.submit(KeyToken("char", "x"))
-    complete(updated)
-    assert updated.result is not None
-    assert updated.result.stars == 1
-    assert repository.save(updated.result)
-    assert repository.best_command_stars(content.id, 1) == 3
-    assert repository.best_command_stars(content.id, 2) == 1
-
-    new_rules = replace(updated.result, attempt_id="new-rules", game_rules_version=2)
-    assert repository.save(new_rules)
-    assert repository.best_command_stars(content.id, 2, game_rules_version=2) == 1
-    assert repository.best_command_stars(content.id, 1, game_rules_version=2) == 0
-    assert not repository.save(new_rules)
+    inaccurate = CommandSession(content)
+    inaccurate.submit(KeyToken("char", "x"))
+    complete(inaccurate)
+    assert inaccurate.result is not None
+    assert inaccurate.result.stars == 1
+    assert not repository.save(inaccurate.result)
+    assert repository.best_command_stars(content.id) == 3
+    assert repository.best_command_stars("different_lesson") == 0
+    assert repository.completed_count == 2
 
 
 @pytest.fixture
@@ -531,11 +523,10 @@ def test_continuous_results_compare_same_generated_problem_and_count(
     assert repository.save(longer)
     assert repository.best_for(first) == faster
     for change in (
-        {"generator_version": first.generator_version + 1},
         {"transcript_digest": "different"},
         {"pause_count": 1},
     ):
         changed = replace(first, attempt_id=str(change), **change)
         assert repository.best_for(changed) is None
         assert repository.save(changed)
-    assert repository.completed_count == 6
+    assert repository.completed_count == 5

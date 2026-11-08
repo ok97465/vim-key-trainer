@@ -159,14 +159,7 @@ def test_generated_multi_edit_documents_complete_through_actual_keys(
     assert session.result.delta == 0 and session.result.stars == 3
     assert page.goal_document.editor_state == goal
     assert page.stack.currentWidget() is page.result_page
-    assert (
-        window.repository.best_edit_stars(
-            profile_id, session.lesson.content_version, mode
-        )
-        == 3
-    )
-    assert window.repository.best_edit_stars(profile_id, 2, mode) == 0
-    assert window.repository.best_edit_stars(profile_id, 1, mode) == 0
+    assert window.repository.best_edit_stars(profile_id, mode) == 3
     qtbot.mouseClick(page.result_new_button, Qt.MouseButton.LeftButton)
     assert page.session is not None and page.session.lesson.practice_spec is not None
     assert page.session.lesson.practice_spec.seed != spec.seed

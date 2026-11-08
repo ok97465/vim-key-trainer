@@ -12,41 +12,31 @@ ComparisonKey = tuple[object, ...]
 
 def comparison_key(result: StoredResult) -> ComparisonKey:
     if isinstance(result, EditingSessionResult):
-        key: ComparisonKey = (
+        return (
             "editing",
             result.lesson_id,
-            result.content_version,
             result.lesson_signature,
-            result.baseline_version,
             result.baseline_keys,
             result.practice_spec,
-            result.generator_version,
+            result.document_spec,
             result.mode,
             result.guide_level,
             result.extra_hints,
             result.step_returns,
             result.pause_count > 0,
-            result.game_rules_version,
         )
-        # 구형 결과의 비교 해시는 보존하고 새 생성 조건만 별도로 확장한다.
-        if result.document_spec is not None:
-            key += (("document", result.document_spec),)
-        return key
     if isinstance(result, CommandSessionResult):
         return (
             "commands",
             result.spec.lesson_id,
             result.spec.seed,
-            result.lesson_version,
             result.lesson_signature,
             result.item_ids,
             result.display_count,
             result.target,
-            result.generator_version,
             result.completed_commands,
             result.transcript_digest,
             result.pause_count > 0,
-            result.game_rules_version,
         )
     spec = result.spec
     return (
@@ -57,7 +47,6 @@ def comparison_key(result: StoredResult) -> ComparisonKey:
         spec.display_width,
         result.target,
         result.pause_count > 0,
-        result.game_rules_version,
     )
 
 

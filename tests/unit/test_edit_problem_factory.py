@@ -8,10 +8,9 @@ import pytest
 
 # Local imports
 from vim_key_trainer.content.code_corpus import load_code_sources
-from vim_key_trainer.content.edit_loader import EditContentError, get_edit_lesson
+from vim_key_trainer.content.edit_loader import EditContentError
 from vim_key_trainer.domain.edit_generator import (
     CODE_SOURCE_SELECTION_VERSION,
-    EDIT_GENERATOR_VERSION,
     list_edit_profiles,
 )
 from vim_key_trainer.domain.editing import EditMode, EditPracticeSpec
@@ -47,7 +46,6 @@ def test_generated_problem_completes_and_records_reproduction_conditions(
     assert session.state == SessionState.COMPLETED
     assert session.result is not None
     assert session.result.practice_spec == spec
-    assert session.result.generator_version == EDIT_GENERATOR_VERSION
     assert session.result.lesson_signature == lesson.signature
     assert session.result.key_count == len(keys)
 
@@ -103,16 +101,6 @@ def test_reproduction_metadata_changes_comparison_signature() -> None:
     assert (
         lesson.signature
         != replace(lesson, generator_version=lesson.generator_version + 1).signature
-    )
-
-
-def test_introductory_lesson_keeps_its_previous_signature() -> None:
-    lesson = get_edit_lesson("editing_numbers")
-    assert lesson.practice_spec is None
-    assert lesson.generator_version == 0
-    assert (
-        lesson.signature
-        == "e5764227eb962c9db1a67f94ae7b552160558b21f3d0898f9d1c0d59c4c96162"
     )
 
 

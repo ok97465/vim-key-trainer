@@ -114,7 +114,7 @@ def test_packaged_lessons_complete_through_qt_keys(
     assert session.result is not None and session.result.stars == 3
     assert session.key_count == len(tokens)
     assert window.repository.completed_count == 1
-    assert window.repository.best_edit_stars(lesson_id, 1, mode) == 3
+    assert window.repository.best_edit_stars(lesson_id, mode) == 3
     assert page.result_summary.text() == (
         f"{session.result.key_count} / {session.result.baseline_keys}회"
     )
@@ -396,8 +396,8 @@ def test_focus_loss_pause_and_catalogs_keep_edit_records_separate(
     assert "완료 1회" in window.editing_menu_page.summary.text()
     assert "완료 0회" in window.commands_summary.text()
     assert "완료 0회" in window.home_summary.text()
-    assert window.repository.best_edit_stars("editing_numbers", 1, "guided") == 0
-    assert window.repository.best_edit_stars("editing_numbers", 1, "free") == 3
+    assert window.repository.best_edit_stars("editing_numbers", "guided") == 0
+    assert window.repository.best_edit_stars("editing_numbers", "free") == 3
     session = begin(window, qtbot)
     window.show_numbers()
     assert session.state == SessionState.ABORTED

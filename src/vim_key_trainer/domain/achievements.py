@@ -5,7 +5,7 @@
 """
 
 # Standard library imports
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 # Local imports
@@ -36,9 +36,8 @@ class LearningSummary:
 def summarize_learning(
     results: Iterable[StoredResult],
     mission_ids: Iterable[str],
-    content_versions: Mapping[str, int] | None = None,
 ) -> LearningSummary:
-    """현재 카탈로그의 버전에 해당하는 완료 미션만 수집 진행도에 반영한다."""
+    """현재 카탈로그에 포함된 완료 미션만 수집 진행도에 반영한다."""
     available = frozenset(mission_ids)
     attempts: dict[str, EditingSessionResult] = {}
     for result in results:
@@ -46,10 +45,6 @@ def summarize_learning(
             isinstance(result, EditingSessionResult)
             and result.state == SessionState.COMPLETED
             and result.lesson_id in available
-            and (
-                content_versions is None
-                or content_versions.get(result.lesson_id) == result.content_version
-            )
         ):
             attempts.setdefault(result.attempt_id, result)
     best_stars: dict[str, int] = {}

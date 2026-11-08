@@ -26,10 +26,8 @@ class DocumentPracticeSpec:
             raise ValueError("문서 미션 ID의 형식이 올바르지 않습니다.")
         if type(self.seed) is not int or not 0 <= self.seed <= 2**32 - 1:
             raise ValueError("seed는 0 이상 2**32 - 1 이하의 정수여야 합니다.")
-        # 3~6곳 조건은 기존 결과 JSON을 읽는 데 필요하다. 새 문제의 최소값은
-        # 생성 경계에서 별도로 검사해 과거 기록의 비교 키를 보존한다.
-        if type(self.change_count) is not int or not 3 <= self.change_count <= 8:
-            raise ValueError("수정 구간 수는 3 이상 8 이하의 정수여야 합니다.")
+        if type(self.change_count) is not int or not 7 <= self.change_count <= 8:
+            raise ValueError("수정 구간 수는 7 이상 8 이하의 정수여야 합니다.")
         if self.technique_weights is not None and not isinstance(
             self.technique_weights, EditTechniqueWeights
         ):

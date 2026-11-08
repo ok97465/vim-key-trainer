@@ -45,9 +45,7 @@ def _refresh_profile_stars(
             value = labels.get((profile.id, mode))
             if value is None:
                 continue
-            stars = repository.best_edit_stars(
-                profile.id, profile.content_version, mode
-            )
+            stars = repository.best_edit_stars(profile.id, mode)
             value.setText(f"{title} " + "★" * stars + "☆" * (3 - stars))
 
 
@@ -215,9 +213,8 @@ class EditCategoryPage(QWidget):
             and result.state == SessionState.COMPLETED
             for result in repository.results
         )
-        versions = {mission.id: mission.content_version for mission in self.missions}
         learning = summarize_learning(
-            repository.results, versions, content_versions=versions
+            repository.results, (mission.id for mission in self.missions)
         )
         self.summary.setText(
             f"학습 완료 {completed}회 · "

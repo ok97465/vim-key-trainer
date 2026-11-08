@@ -267,9 +267,7 @@ class EditingSession:
         return EditingSessionResult(
             attempt_id=self.attempt_id,
             lesson_id=self.lesson.id,
-            content_version=self.lesson.content_version,
             lesson_signature=self.lesson.signature,
-            baseline_version=self.lesson.baseline_version,
             mode=self.mode,
             state=self.state,
             key_count=self.key_count,
@@ -285,6 +283,5 @@ class EditingSession:
             pause_count=self.pause_count,
             guide_level=self.guide_level,
             practice_spec=self.lesson.practice_spec,
-            generator_version=self.lesson.generator_version,
             document_spec=self.lesson.document_spec,
         )

@@ -92,12 +92,7 @@ def test_real_document_missions_complete_with_colored_targets_and_independent_re
     )
     assert page.result_time.text() == f"{session.result.elapsed_seconds:.1f}초"
     assert session.lesson.title in page.result_context.text()
-    assert (
-        window.repository.best_edit_stars(
-            mission_id, session.lesson.content_version, mode
-        )
-        == 3
-    )
+    assert window.repository.best_edit_stars(mission_id, mode) == 3
     window.show_editing()
     assert "문서 복구 1/" in window.editing_menu_page.summary.text()
     assert "첫" in window.editing_menu_page.achievements.text()

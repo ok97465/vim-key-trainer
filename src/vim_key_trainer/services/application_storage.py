@@ -26,7 +26,7 @@ from vim_key_trainer.services.sqlite_repository import (
 def open_application_repository(
     directory: Path | None = None,
 ) -> tuple[ResultRepository, str | None]:
-    """기존 DB를 보존하며, 열기 실패 시 학습 가능한 메모리 저장소를 제공한다."""
+    """현재 버전의 기록을 열고, 실패 시 메모리 저장소로 연습을 계속한다."""
     directory = (
         directory
         if directory is not None
@@ -72,7 +72,6 @@ def _register_catalog(repository: SqliteResultRepository) -> None:
                 id=mission.id,
                 source_id=source.id,
                 collection_id=mission.collection_id,
-                content_version=mission.content_version,
                 title=mission.title,
                 repair_count=mission.repair_count,
                 signature=lesson.signature,

@@ -1,4 +1,4 @@
-"""버전 있는 SQLite 기록·출처·미션 카탈로그와 실패 시 메모리 보존.
+"""현재 형식의 SQLite 기록·출처·미션 카탈로그와 실패 시 메모리 보존.
 
 원문은 패키지 자원에 보관한다. DB에는 고정 revision/hash의 출처와 미션 메타데이터,
 시도별 결과 및 비교 기록만 둔다. 시도 INSERT와 별/최고 기록 반영은 한 트랜잭션이다.
@@ -27,8 +27,7 @@ from vim_key_trainer.services.result_codec import (
 )
 from vim_key_trainer.services.result_comparison import is_better_result
 from vim_key_trainer.services.result_repository import MemoryResultRepository
-
-DATABASE_SCHEMA_VERSION = 1
+from vim_key_trainer.services.storage_version import STORAGE_VERSION
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,7 +57,6 @@ class MissionRecord:
     id: str
     source_id: str
     collection_id: str
-    content_version: int
     title: str
     repair_count: int
     signature: str
@@ -74,10 +72,9 @@ class MissionRecord:
                     self.signature,
                 )
             )
-            or self.content_version < 1
             or self.repair_count < 3
         ):
-            raise ValueError("미션은 버전·출처와 3곳 이상의 수정 구간이 필요합니다.")
+            raise ValueError("미션은 출처와 3곳 이상의 수정 구간이 필요합니다.")
 
 
 _SCHEMA = (
@@ -88,16 +85,15 @@ _SCHEMA = (
         UNIQUE(url, revision, sha256)
     )""",
     """CREATE TABLE mission_catalog (
-        id TEXT NOT NULL, content_version INTEGER NOT NULL CHECK(content_version > 0),
+        id TEXT PRIMARY KEY,
         source_id TEXT NOT NULL REFERENCES source_documents(id),
         collection_id TEXT NOT NULL, title TEXT NOT NULL,
-        repair_count INTEGER NOT NULL CHECK(repair_count >= 3), signature TEXT NOT NULL,
-        PRIMARY KEY(id, content_version)
+        repair_count INTEGER NOT NULL CHECK(repair_count >= 3), signature TEXT NOT NULL
     )""",
     """CREATE TABLE attempts (
         attempt_id TEXT PRIMARY KEY, result_kind TEXT NOT NULL,
         state TEXT NOT NULL CHECK(state IN ('completed', 'aborted')),
-        lesson_id TEXT NOT NULL, content_version INTEGER NOT NULL,
+        lesson_id TEXT NOT NULL,
         mode TEXT NOT NULL, comparison_key TEXT NOT NULL,
         result_json TEXT NOT NULL, recorded_at_utc TEXT NOT NULL
     )""",
@@ -107,14 +103,12 @@ _SCHEMA = (
     )""",
     """CREATE TABLE lesson_progress (
         result_kind TEXT NOT NULL, lesson_id TEXT NOT NULL,
-        content_version INTEGER NOT NULL, mode TEXT NOT NULL,
-        guide_level TEXT NOT NULL, game_rules_version INTEGER NOT NULL,
+        mode TEXT NOT NULL, guide_level TEXT NOT NULL,
         completed_count INTEGER NOT NULL CHECK(completed_count >= 1),
         best_stars INTEGER NOT NULL CHECK(best_stars BETWEEN 0 AND 3),
-        PRIMARY KEY(result_kind, lesson_id, content_version, mode,
-                    guide_level, game_rules_version)
+        PRIMARY KEY(result_kind, lesson_id, mode, guide_level)
     )""",
-    "CREATE INDEX attempts_lesson ON attempts(lesson_id, content_version, mode)",
+    "CREATE INDEX attempts_lesson ON attempts(lesson_id, mode)",
     "CREATE INDEX missions_collection ON mission_catalog(collection_id)",
 )
 
@@ -123,12 +117,12 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-def _lesson_conditions(result: StoredResult) -> tuple[str, int, str, str]:
+def _lesson_conditions(result: StoredResult) -> tuple[str, str, str]:
     if isinstance(result, EditingSessionResult):
-        return result.lesson_id, result.content_version, result.mode, result.guide_level
+        return result.lesson_id, result.mode, result.guide_level
     if isinstance(result, CommandSessionResult):
-        return result.spec.lesson_id, result.lesson_version, "typing", "none"
-    return result.spec.exercise_id, 0, "typing", "none"
+        return result.spec.lesson_id, "typing", "none"
+    return result.spec.exercise_id, "typing", "none"
 
 
 class SqliteResultRepository(MemoryResultRepository):
@@ -143,8 +137,8 @@ class SqliteResultRepository(MemoryResultRepository):
         path.parent.mkdir(parents=True, exist_ok=True)
         self._connection = sqlite3.connect(path, timeout=0.2)
         try:
+            self._initialize_database()
             self._connection.execute("PRAGMA foreign_keys = ON")
-            self._migrate()
             self._load_results()
         except (ValueError, sqlite3.DatabaseError):
             self._connection.close()
@@ -158,35 +152,41 @@ class SqliteResultRepository(MemoryResultRepository):
     def pending_count(self) -> int:
         return len(self._pending)
 
-    def _migrate(self) -> None:
+    def _initialize_database(self) -> None:
         version = self._connection.execute("PRAGMA user_version").fetchone()[0]
-        if version > DATABASE_SCHEMA_VERSION:
-            raise ValueError("이 앱보다 새로운 데이터베이스 형식입니다.")
-        if version == DATABASE_SCHEMA_VERSION:
+        if version == STORAGE_VERSION:
             return
+        self._connection.execute("PRAGMA foreign_keys = OFF")
         with self._connection:
-            # DDL과 user_version까지 함께 롤백하도록 명시적으로 시작한다.
+            # 이 DB는 앱 기록 전용이다. 버전이 다르면 변환 없이 모두 초기화한다.
+            # 삭제·생성·버전 변경을 함께 롤백할 수 있게 트랜잭션을 명시한다.
             self._connection.execute("BEGIN IMMEDIATE")
+            objects = self._connection.execute(
+                "SELECT type, name FROM sqlite_schema WHERE type IN ('table', 'view') "
+                "AND name NOT GLOB 'sqlite_*'"
+            ).fetchall()
+            for kind, name in objects:
+                quoted_name = name.replace('"', '""')
+                self._connection.execute(f'DROP {kind.upper()} "{quoted_name}"')
             for statement in _SCHEMA:
                 self._connection.execute(statement)
-            self._connection.execute(f"PRAGMA user_version = {DATABASE_SCHEMA_VERSION}")
+            self._connection.execute(f"PRAGMA user_version = {STORAGE_VERSION}")
 
     def _load_results(self) -> None:
         issues: list[str] = []
         for row in self._connection.execute(
-            """SELECT attempt_id, result_kind, state, lesson_id, content_version,
+            """SELECT attempt_id, result_kind, state, lesson_id,
                       mode, comparison_key, result_json FROM attempts ORDER BY rowid"""
         ):
             attempt_id, *_, payload = row
             try:
                 result = decode_result(payload)
-                lesson_id, version, mode, _guide = _lesson_conditions(result)
+                lesson_id, mode, _guide = _lesson_conditions(result)
                 expected = (
                     result.attempt_id,
                     result_kind(result),
                     result.state.value,
                     lesson_id,
-                    version,
                     mode,
                     comparison_digest(result),
                 )
@@ -223,18 +223,17 @@ class SqliteResultRepository(MemoryResultRepository):
     def _write_result(self, result: StoredResult) -> None:
         payload = encode_result(result)
         kind = result_kind(result)
-        lesson_id, content_version, mode, guide_level = _lesson_conditions(result)
+        lesson_id, mode, guide_level = _lesson_conditions(result)
         digest = comparison_digest(result)
         timestamp = self._clock().astimezone(UTC).isoformat()
         with self._connection:
             inserted = self._connection.execute(
-                """INSERT OR IGNORE INTO attempts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT OR IGNORE INTO attempts VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     result.attempt_id,
                     kind,
                     result.state.value,
                     lesson_id,
-                    content_version,
                     mode,
                     digest,
                     payload,
@@ -244,18 +243,15 @@ class SqliteResultRepository(MemoryResultRepository):
             if not inserted.rowcount or result.state != SessionState.COMPLETED:
                 return
             self._connection.execute(
-                """INSERT INTO lesson_progress VALUES (?, ?, ?, ?, ?, ?, 1, ?)
-                ON CONFLICT(result_kind, lesson_id, content_version, mode, guide_level,
-                            game_rules_version) DO UPDATE SET
+                """INSERT INTO lesson_progress VALUES (?, ?, ?, ?, 1, ?)
+                ON CONFLICT(result_kind, lesson_id, mode, guide_level) DO UPDATE SET
                     completed_count = completed_count + 1,
                     best_stars = MAX(best_stars, excluded.best_stars)""",
                 (
                     kind,
                     lesson_id,
-                    content_version,
                     mode,
                     guide_level,
-                    result.game_rules_version,
                     result.stars,
                 ),
             )
@@ -331,26 +327,15 @@ class SqliteResultRepository(MemoryResultRepository):
                     values,
                 )
             for mission in missions:
-                previous = self._connection.execute(
-                    """SELECT source_id, repair_count, signature FROM mission_catalog
-                    WHERE id=? AND content_version=?""",
-                    (mission.id, mission.content_version),
-                ).fetchone()
-                if previous is not None and previous != (
-                    mission.source_id,
-                    mission.repair_count,
-                    mission.signature,
-                ):
-                    raise ValueError(
-                        "미션의 목표·출처가 바뀌면 콘텐츠 버전을 올려야 합니다."
-                    )
                 self._connection.execute(
-                    """INSERT INTO mission_catalog VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(id, content_version) DO UPDATE SET
-                        title=excluded.title, collection_id=excluded.collection_id""",
+                    """INSERT INTO mission_catalog VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        source_id=excluded.source_id,
+                        collection_id=excluded.collection_id,
+                        title=excluded.title, repair_count=excluded.repair_count,
+                        signature=excluded.signature""",
                     (
                         mission.id,
-                        mission.content_version,
                         mission.source_id,
                         mission.collection_id,
                         mission.title,

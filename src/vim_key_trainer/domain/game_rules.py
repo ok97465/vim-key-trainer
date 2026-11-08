@@ -1,7 +1,5 @@
 """입력 통계와 별을 분리해 계산하는 순수 함수."""
 
-GAME_RULES_VERSION = 1
-
 
 def typing_stars(
     *,

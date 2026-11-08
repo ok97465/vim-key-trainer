@@ -240,14 +240,13 @@ def test_new_damage_families_have_independent_replay_verified_repairs() -> None:
 
 
 @pytest.mark.parametrize("change_count", [3, 5, 6])
-def test_legacy_conditions_are_readable_but_new_practice_requires_seven_repairs(
+def test_practice_conditions_reject_fewer_than_seven_repairs(
     change_count: int,
 ) -> None:
     mission = MISSIONS[0]
     assert DocumentPracticeSpec(mission.id, 1).change_count == 7
-    spec = DocumentPracticeSpec(mission.id, 1, change_count)
-    with pytest.raises(ValueError, match="최소 7곳"):
-        generate_document_problem(mission, spec)
+    with pytest.raises(ValueError, match="7 이상"):
+        DocumentPracticeSpec(mission.id, 1, change_count)
 
 
 @pytest.mark.parametrize(

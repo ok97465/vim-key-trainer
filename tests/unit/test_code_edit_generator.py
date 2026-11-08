@@ -327,35 +327,3 @@ def test_missing_or_wrong_language_source_is_rejected(language: str) -> None:
             ),
             code_sources=sources,
         )
-
-
-@pytest.mark.parametrize(
-    "profile_id,line_count,signature",
-    [
-        (
-            "code_python",
-            300,
-            "a3c004a490f27d7d50fb7050d36f1bebaef905b8f336607ca17a58d32b6640d0",
-        ),
-        (
-            "code_cpp",
-            300,
-            "65c7aea4d1d61d63f285cd6b2381542cbe5f1cd2d9cdc9c29950ad7e1509b4a4",
-        ),
-        (
-            "code_json",
-            60,
-            "e7658b89e0cdcf31ebe4a39afda8017ba591fea0e0529b0db3959b8e3ffd8f3b",
-        ),
-        (
-            "editing_numbers",
-            24,
-            "8dc394070b14074a4436811c566094e473375ef1bd6406ac040c34433e9a529f",
-        ),
-    ],
-)
-def test_generated_lesson_signatures_are_stable_for_current_versions(
-    profile_id: str, line_count: int, signature: str
-) -> None:
-    lesson = create_edit_problem(EditPracticeSpec(profile_id, 42, line_count))
-    assert lesson.signature == signature

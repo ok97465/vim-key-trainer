@@ -308,5 +308,5 @@ def test_packaged_command_lessons_complete_through_qt_keys(
     assert session.result.correct == len(session.target)
     assert session.result.stars == 3
     assert len(session.command_times) == len(lesson.items)
-    assert page.repository.best_command_stars(lesson.id, lesson.content_version) == 3
+    assert page.repository.best_command_stars(lesson.id) == 3
     assert page.stack.currentWidget() is page.result_page

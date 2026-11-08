@@ -10,7 +10,6 @@ from vim_key_trainer.domain.commands import CommandSpec
 from vim_key_trainer.domain.document_missions import DocumentPracticeSpec
 from vim_key_trainer.domain.editing import EditMode, EditPracticeSpec
 from vim_key_trainer.domain.exercises import PracticeSpec
-from vim_key_trainer.domain.game_rules import GAME_RULES_VERSION
 from vim_key_trainer.domain.keys import KeyToken
 
 
@@ -45,7 +44,6 @@ class SessionResult:
     keypad_errors: int
     pause_count: int
     reaction_times: tuple[tuple[str, float], ...]
-    game_rules_version: int = GAME_RULES_VERSION
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,15 +70,12 @@ class CommandSessionResult:
     keypad_errors: int
     pause_count: int
     reaction_times: tuple[tuple[str, float], ...]
-    lesson_version: int
     lesson_signature: str
     item_ids: tuple[str, ...]
     display_count: int
     completed_commands: int
     command_times: tuple[tuple[str, float], ...]
     commands_per_minute: float | None
-    game_rules_version: int = GAME_RULES_VERSION
-    generator_version: int = 0
     transcript_digest: str = ""
     command_samples: tuple[CommandTiming, ...] = ()
 
@@ -89,9 +84,7 @@ class CommandSessionResult:
 class EditingSessionResult:
     attempt_id: str
     lesson_id: str
-    content_version: int
     lesson_signature: str
-    baseline_version: int
     mode: EditMode
     state: SessionState
     key_count: int
@@ -106,9 +99,7 @@ class EditingSessionResult:
     step_returns: int
     pause_count: int
     guide_level: str
-    game_rules_version: int = GAME_RULES_VERSION
     practice_spec: EditPracticeSpec | None = None
-    generator_version: int = 0
     document_spec: DocumentPracticeSpec | None = None
 
     @property

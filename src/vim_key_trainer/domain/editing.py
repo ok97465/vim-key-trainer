@@ -4,7 +4,7 @@
 import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from random import Random
 from typing import Literal
 
@@ -112,7 +112,8 @@ class EditLesson:
                 state.pending,
             )
 
-        data: tuple[object, ...] = (
+        excerpt = self.code_excerpt
+        data = (
             self.schema_version,
             self.content_version,
             state_data(self.initial),
@@ -130,47 +131,20 @@ class EditLesson:
             tuple((key.kind, key.value) for key in self.baseline),
             self.baseline_keys,
             self.free_enabled,
+            asdict(self.practice_spec) if self.practice_spec is not None else None,
+            asdict(self.document_spec) if self.document_spec is not None else None,
+            self.generator_version,
+            (
+                excerpt.source.id,
+                excerpt.source.revision,
+                excerpt.source.sha256,
+                excerpt.source.transformation,
+                excerpt.start_line,
+                excerpt.end_line,
+            )
+            if excerpt is not None
+            else None,
         )
-        if self.practice_spec is not None or self.generator_version:
-            spec = self.practice_spec
-            generation = (
-                (spec.profile_id, spec.seed, spec.document_lines)
-                if spec is not None
-                else None
-            )
-            data += (generation, self.generator_version)
-        if self.document_spec is not None:
-            document = self.document_spec
-            data += (
-                ("document", document.mission_id, document.seed, document.change_count),
-            )
-        if self.code_excerpt is not None:
-            excerpt = self.code_excerpt
-            source = excerpt.source
-            data += (
-                (
-                    "code_excerpt",
-                    source.id,
-                    source.revision,
-                    source.sha256,
-                    source.transformation,
-                    excerpt.start_line,
-                    excerpt.end_line,
-                ),
-            )
-        if (
-            self.practice_spec is not None
-            and self.practice_spec.code_source_id is not None
-        ):
-            data += (("code_source_id", self.practice_spec.code_source_id),)
-        for specification in (self.practice_spec, self.document_spec):
-            if (
-                specification is not None
-                and specification.technique_weights is not None
-            ):
-                data += (
-                    ("technique_weights", specification.technique_weights.items()),
-                )
         return hashlib.sha256(
             json.dumps(data, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest()

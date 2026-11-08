@@ -109,18 +109,6 @@ def test_measured_time_replaces_an_unmeasured_best_at_equal_accuracy() -> None:
     assert repository.best_for(unmeasured) == measured
 
 
-def test_symbol_stars_separate_game_rules_versions() -> None:
-    repository = MemoryResultRepository()
-    original = completed_result()
-    assert repository.save(original)
-    updated = replace(
-        completed_result(mistakes=1), game_rules_version=original.game_rules_version + 1
-    )
-    assert repository.save(updated)
-    assert repository.best_stars("numbers", original.game_rules_version) == 3
-    assert repository.best_stars("numbers", updated.game_rules_version) == 1
-
-
 def edit_result(
     *, mode: str = "free", keys: int = 5, seconds: float = 3
 ) -> EditingSessionResult:
@@ -128,9 +116,7 @@ def edit_result(
     return EditingSessionResult(
         attempt_id=str(uuid4()),
         lesson_id="editing_numbers",
-        content_version=1,
         lesson_signature="same-start-goal-allowed-commands",
-        baseline_version=1,
         mode="guided" if guided else "free",
         state=SessionState.COMPLETED,
         key_count=keys,
@@ -154,8 +140,8 @@ def test_editing_modes_have_independent_stars_and_records() -> None:
     guided = replace(edit_result(mode="guided"), stars=1)
     assert repository.save(free)
     assert repository.save(guided)
-    assert repository.best_edit_stars(free.lesson_id, 1, "free") == 3
-    assert repository.best_edit_stars(free.lesson_id, 1, "guided") == 1
+    assert repository.best_edit_stars(free.lesson_id, "free") == 3
+    assert repository.best_edit_stars(free.lesson_id, "guided") == 1
     assert repository.best_for(free) == free
     assert repository.best_for(guided) == guided
 
@@ -191,20 +177,17 @@ def test_guided_record_prefers_accuracy_before_time() -> None:
     assert repository.best_for(initial) == faster
 
 
-def test_editing_assistance_versions_and_conditions_compare_separately() -> None:
+def test_editing_assistance_and_problem_conditions_compare_separately() -> None:
     repository = MemoryResultRepository()
     initial = edit_result()
     assert repository.save(initial)
     for changes in (
-        {"content_version": 2},
-        {"baseline_version": 2},
         {"baseline_keys": 4},
         {"lesson_signature": "different-start-or-goal-or-allowed"},
         {"extra_hints": 1},
         {"step_returns": 1},
         {"pause_count": 1},
         {"guide_level": "other-level"},
-        {"game_rules_version": 2},
     ):
         changed = replace(
             initial,
@@ -232,31 +215,25 @@ def test_editing_result_is_applied_once_and_abort_cannot_award() -> None:
     assert repository.completed_count == 1
     assert len(repository.results) == 2
     assert repository.best_for(result) == result
-    assert repository.best_edit_stars(result.lesson_id, 1, "free") == 3
+    assert repository.best_edit_stars(result.lesson_id, "free") == 3
 
 
-def test_editing_stars_are_versioned_and_never_decrease() -> None:
+def test_editing_stars_never_decrease() -> None:
     repository = MemoryResultRepository()
     initial = edit_result()
     assert repository.save(initial)
     assert not repository.save(replace(edit_result(keys=10), stars=1))
-    versioned = replace(edit_result(keys=10), content_version=2, stars=1)
-    assert repository.save(versioned)
-    assert repository.best_edit_stars(initial.lesson_id, 1, "free") == 3
-    assert repository.best_edit_stars(initial.lesson_id, 2, "free") == 1
+    assert repository.best_edit_stars(initial.lesson_id, "free") == 3
 
 
-def test_generated_editing_records_keep_seed_length_and_generator_separate() -> None:
+def test_generated_editing_records_keep_seed_and_length_separate() -> None:
     repository = MemoryResultRepository()
     spec = EditPracticeSpec("editing_numbers", seed=101)
-    original = replace(
-        edit_result(), content_version=2, practice_spec=spec, generator_version=1
-    )
+    original = replace(edit_result(), practice_spec=spec)
     assert repository.save(original)
     for changes in (
         {"practice_spec": replace(spec, seed=102)},
         {"practice_spec": replace(spec, document_lines=40)},
-        {"generator_version": 2},
     ):
         different = replace(
             original, attempt_id=str(uuid4()), elapsed_seconds=100, **changes
@@ -266,8 +243,7 @@ def test_generated_editing_records_keep_seed_length_and_generator_separate() -> 
     faster = replace(original, attempt_id=str(uuid4()), elapsed_seconds=1)
     assert repository.save(faster)
     assert repository.best_for(original) == faster
-    assert repository.best_edit_stars("editing_numbers", 1, "free") == 0
-    assert repository.best_edit_stars("editing_numbers", 2, "free") == 3
+    assert repository.best_edit_stars("editing_numbers", "free") == 3
 
 
 @pytest.mark.parametrize(

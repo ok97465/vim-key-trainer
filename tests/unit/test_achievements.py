@@ -13,9 +13,7 @@ def result(mission_id: str, *, stars: int = 3) -> EditingSessionResult:
     return EditingSessionResult(
         attempt_id=str(uuid4()),
         lesson_id=mission_id,
-        content_version=1,
         lesson_signature="fixed-mission-goal",
-        baseline_version=1,
         mode="guided",
         state=SessionState.COMPLETED,
         key_count=12,
@@ -77,16 +75,12 @@ def test_different_modes_share_one_collection_slot_but_keep_best_stars() -> None
     assert {"own_shortcut", "independent_repair"} <= badge_ids(summary)
 
 
-def test_current_catalog_versions_exclude_stale_unknown_and_aborted_results() -> None:
+def test_current_catalog_excludes_unknown_and_aborted_results() -> None:
     matching = result("mission_current")
-    stale = result("mission_stale")
     unknown = result("removed_mission")
     aborted = replace(result("mission_aborted"), state=SessionState.ABORTED, stars=0)
-    ids = ("mission_current", "mission_stale", "mission_aborted")
     summary = summarize_learning(
-        (matching, stale, unknown, aborted),
-        ids,
-        {"mission_current": 1, "mission_stale": 2, "mission_aborted": 1},
+        (matching, unknown, aborted), ("mission_current", "mission_aborted")
     )
     assert summary.completed_ids == frozenset({"mission_current"})
     assert summary.total_stars == 3

@@ -1,4 +1,4 @@
-"""선택한 코드 원문을 결과·DB에 보존하고 구형 결과와 비교 키를 유지한다."""
+"""선택한 코드 원문의 결과 저장과 비교 조건을 검증한다."""
 
 # Standard library imports
 import json
@@ -15,12 +15,12 @@ from vim_key_trainer.domain.sessions import EditingSessionResult, InputResult
 from vim_key_trainer.services.edit_problem_factory import create_edit_problem
 from vim_key_trainer.services.edit_session import EditingSession
 from vim_key_trainer.services.result_codec import (
-    RESULT_SCHEMA_VERSION,
     comparison_digest,
     decode_result,
     encode_result,
 )
 from vim_key_trainer.services.sqlite_repository import SqliteResultRepository
+from vim_key_trainer.services.storage_version import STORAGE_VERSION
 
 
 @pytest.fixture(scope="module")
@@ -42,7 +42,7 @@ def test_selected_source_round_trips_through_json_and_database(
 ) -> None:
     payload = encode_result(selected_result)
     data = json.loads(payload)
-    assert data["schema_version"] == RESULT_SCHEMA_VERSION == 4
+    assert data["schema_version"] == STORAGE_VERSION
     spec = selected_result.practice_spec
     assert spec is not None
     assert data["data"]["practice_spec"]["code_source_id"] == spec.code_source_id
@@ -57,20 +57,6 @@ def test_selected_source_round_trips_through_json_and_database(
     assert reopened.best_for(selected_result) == selected_result
     assert not reopened.save(selected_result)
     reopened.close()
-
-
-@pytest.mark.parametrize("version", [1, 2, 3])
-@pytest.mark.parametrize("source_id", [None, "selected_source"])
-def test_old_result_versions_cannot_claim_code_document_selection(
-    selected_result: EditingSessionResult, version: int, source_id: str | None
-) -> None:
-    data = json.loads(encode_result(selected_result))
-    data["schema_version"] = version
-    if version == 1:
-        data["data"].pop("document_spec")
-    data["data"]["practice_spec"]["code_source_id"] = source_id
-    with pytest.raises(ValueError, match="버전 4"):
-        decode_result(json.dumps(data))
 
 
 def test_document_selection_has_a_distinct_comparison_key(
@@ -88,22 +74,14 @@ def test_document_selection_has_a_distinct_comparison_key(
     )
     assert len({comparison_digest(result) for result in versions}) == 3
     random_data = json.loads(encode_result(versions[1]))
-    assert "code_source_id" not in random_data["data"]["practice_spec"]
+    assert random_data["data"]["practice_spec"]["code_source_id"] is None
 
 
-def test_retired_source_remains_readable_without_current_corpus_membership(
-    selected_result: EditingSessionResult,
+@pytest.mark.parametrize("version", [0, STORAGE_VERSION - 1, STORAGE_VERSION + 1])
+def test_result_requires_the_current_storage_version(
+    selected_result: EditingSessionResult, version: int
 ) -> None:
-    spec = selected_result.practice_spec
-    assert spec is not None
-    retired = replace(
-        selected_result, practice_spec=replace(spec, code_source_id="retired_source")
-    )
-    assert decode_result(encode_result(retired)) == retired
-
-
-def test_selected_source_requires_a_supporting_generator_version(
-    selected_result: EditingSessionResult,
-) -> None:
-    with pytest.raises(ValueError, match="생성 조건"):
-        decode_result(encode_result(replace(selected_result, generator_version=3)))
+    payload = json.loads(encode_result(selected_result))
+    payload["schema_version"] = version
+    with pytest.raises(ValueError, match="스키마 버전"):
+        decode_result(json.dumps(payload))

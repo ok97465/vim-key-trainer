@@ -876,8 +876,6 @@ def generate_document_problem(
     """같은 문서·seed·구간 수는 같은 손상 키와 복원 풀이를 만든다."""
     if mission.id != spec.mission_id:
         raise ValueError("문서와 문제 생성 조건의 ID가 다릅니다.")
-    if spec.change_count < 7:
-        raise ValueError("새 문서 복구 연습에는 최소 7곳의 수정 구간이 필요합니다.")
     rng = Random(spec.seed)
     original = EditorState(mission.goal_lines)
     damage = GuideBuilder(original, SUPPORTED_COMMANDS)

@@ -100,7 +100,7 @@ class MainWindow(QMainWindow):
         self._result_metrics: dict[str, QLabel] = {}
         self._metric_labels: dict[str, QLabel] = {}
         self._lesson_stars: dict[str, QLabel] = {}
-        self._command_lesson_stars: dict[tuple[str, int], QLabel] = {}
+        self._command_lesson_stars: dict[str, QLabel] = {}
         self._category = "numbers"
         self._cheatsheet_return_page: QWidget | None = None
         self._cheatsheet_return_focus: QWidget | None = None
@@ -296,7 +296,7 @@ class MainWindow(QMainWindow):
             top.addWidget(label(lesson.title, "sectionTitle"))
             top.addStretch()
             stars = label("☆☆☆", "eyebrow")
-            self._command_lesson_stars[(lesson.id, lesson.content_version)] = stars
+            self._command_lesson_stars[lesson.id] = stars
             top.addWidget(stars)
             box.addLayout(top)
             box.addWidget(label(lesson.example, "eyebrow", wrap=True))
@@ -723,8 +723,8 @@ class MainWindow(QMainWindow):
             stars = self.repository.best_stars(exercise_id)
             widget.setText("★" * stars + "☆" * (3 - stars))
 
-        for (lesson_id, version), widget in self._command_lesson_stars.items():
-            stars = self.repository.best_command_stars(lesson_id, version)
+        for lesson_id, widget in self._command_lesson_stars.items():
+            stars = self.repository.best_command_stars(lesson_id)
             widget.setText("★" * stars + "☆" * (3 - stars))
 
     def show_numbers(self) -> None:

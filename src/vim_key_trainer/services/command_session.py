@@ -249,7 +249,6 @@ class CommandSession:
             keypad_errors=self.keypad_errors,
             pause_count=self.pause_count,
             reaction_times=tuple(self._reaction_times),
-            lesson_version=self.lesson.content_version,
             lesson_signature=self._lesson_signature,
             item_ids=tuple(item.id for item in self.items),
             display_count=self.lesson.display_count,
@@ -349,7 +348,6 @@ class ContinuousCommandSession(CommandSession):
             # 전체 스트림 대신 재생 조건과 누적 해시를 기록한다.
             target=(),
             item_ids=tuple(sample.item_id for sample in self._command_samples),
-            generator_version=GENERATOR_VERSION,
             transcript_digest=self._transcript.hexdigest(),
             command_samples=self.command_samples,
         )

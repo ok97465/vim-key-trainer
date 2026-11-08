@@ -1,4 +1,4 @@
-"""실행 가능한 객체 대신 버전 있는 JSON으로 결과를 저장한다."""
+"""현재 저장 형식의 JSON을 검증해 학습 결과로 변환한다."""
 
 # Standard library imports
 import hashlib
@@ -21,9 +21,8 @@ from vim_key_trainer.domain.sessions import (
     StoredResult,
 )
 from vim_key_trainer.services.result_comparison import comparison_key
+from vim_key_trainer.services.storage_version import STORAGE_VERSION
 
-RESULT_SCHEMA_VERSION = 4
-_READABLE_SCHEMA_VERSIONS = frozenset({1, 2, 3, RESULT_SCHEMA_VERSION})
 ResultKind = Literal["symbols", "commands", "editing"]
 
 
@@ -56,8 +55,6 @@ def _json_value(value: object) -> object:
         return {
             field.name: _json_value(getattr(value, field.name))
             for field in fields(value)
-            if field.name not in {"technique_weights", "code_source_id"}
-            or getattr(value, field.name) is not None
         }
     if isinstance(value, Mapping):
         return {str(key): _json_value(item) for key, item in value.items()}
@@ -81,7 +78,7 @@ def _dumps(value: object) -> str:
 def encode_result(result: StoredResult) -> str:
     return _dumps(
         {
-            "schema_version": RESULT_SCHEMA_VERSION,
+            "schema_version": STORAGE_VERSION,
             "kind": result_kind(result),
             "data": result,
         }
@@ -120,63 +117,52 @@ def _validate_accuracy(
         raise ValueError("저장된 정확도가 정답·오답 입력 수와 다릅니다.")
 
 
-def _validate_statistics(result: StoredResult) -> None:
-    if result.game_rules_version < 1:
-        raise ValueError("게임 규칙 버전은 1 이상이어야 합니다.")
-    if isinstance(result, EditingSessionResult):
-        if (
-            result.key_count < 0
-            or result.baseline_keys < 1
-            or result.extra_hints < 0
-            or result.step_returns < 0
-            or result.content_version < 1
-            or result.baseline_version < 1
-            or result.generator_version < 0
-        ):
-            raise ValueError("편집 입력·보조 사용 횟수·버전이 올바르지 않습니다.")
-        if result.practice_spec is not None and (
-            result.practice_spec.profile_id != result.lesson_id
-            or result.generator_version < 1
-            or (
-                result.practice_spec.code_source_id is not None
-                and result.generator_version < 4
+def _validate_editing_statistics(result: EditingSessionResult) -> None:
+    if (
+        result.key_count < 0
+        or result.baseline_keys < 1
+        or result.extra_hints < 0
+        or result.step_returns < 0
+    ):
+        raise ValueError("편집 입력·보조 사용 횟수가 올바르지 않습니다.")
+    if (
+        result.practice_spec is not None
+        and result.practice_spec.profile_id != result.lesson_id
+    ):
+        raise ValueError("편집 생성 조건이 결과의 레슨과 다릅니다.")
+    if result.document_spec is not None and (
+        result.document_spec.mission_id != result.lesson_id
+        or result.practice_spec is not None
+    ):
+        raise ValueError("문서 손상 생성 조건이 결과의 미션과 다릅니다.")
+    if result.state == SessionState.COMPLETED and result.key_count == 0:
+        raise ValueError("완료한 편집 결과에는 채점 입력이 필요합니다.")
+    if result.mode == "free":
+        if any(
+            value is not None
+            for value in (
+                result.correct,
+                result.incorrect,
+                result.accuracy,
+                result.max_combo,
             )
         ):
-            raise ValueError("편집 생성 조건이 결과의 레슨·버전과 다릅니다.")
-        if result.document_spec is not None and (
-            result.document_spec.mission_id != result.lesson_id
-            or result.practice_spec is not None
-            or result.generator_version < 1
-        ):
-            raise ValueError("문서 손상 생성 조건이 결과의 미션·버전과 다릅니다.")
-        if result.state == SessionState.COMPLETED and result.key_count == 0:
-            raise ValueError("완료한 편집 결과에는 채점 입력이 필요합니다.")
-        if result.mode == "free":
-            if any(
-                value is not None
-                for value in (
-                    result.correct,
-                    result.incorrect,
-                    result.accuracy,
-                    result.max_combo,
-                )
-            ):
-                raise ValueError(
-                    "자유 풀이에는 가이드 정확도·콤보를 저장할 수 없습니다."
-                )
-            return
-        if (
-            result.correct is None
-            or result.incorrect is None
-            or result.max_combo is None
-            or result.correct + result.incorrect != result.key_count
-            or (result.state == SessionState.COMPLETED and result.correct == 0)
-        ):
-            raise ValueError("가이드 입력 통계가 누적 입력 수와 다릅니다.")
-        _validate_accuracy(
-            result.correct, result.incorrect, result.accuracy, result.max_combo
-        )
+            raise ValueError("자유 풀이에는 가이드 정확도·콤보를 저장할 수 없습니다.")
         return
+    if (
+        result.correct is None
+        or result.incorrect is None
+        or result.max_combo is None
+        or result.correct + result.incorrect != result.key_count
+        or (result.state == SessionState.COMPLETED and result.correct == 0)
+    ):
+        raise ValueError("가이드 입력 통계가 누적 입력 수와 다릅니다.")
+    _validate_accuracy(
+        result.correct, result.incorrect, result.accuracy, result.max_combo
+    )
+
+
+def _validate_typing_statistics(result: SessionResult | CommandSessionResult) -> None:
     _validate_accuracy(
         result.correct, result.incorrect, result.accuracy, result.max_combo
     )
@@ -197,12 +183,10 @@ def _validate_statistics(result: StoredResult) -> None:
         raise ValueError("저장된 속도·반응 시간·명령 시간이 올바르지 않습니다.")
     if isinstance(result, CommandSessionResult):
         if (
-            result.lesson_version < 1
-            or result.generator_version < 0
-            or not 0 <= result.completed_commands <= result.correct
+            not 0 <= result.completed_commands <= result.correct
             or result.display_count < 1
         ):
-            raise ValueError("명령 완료 수·표시량·버전이 올바르지 않습니다.")
+            raise ValueError("명령 완료 수·표시량이 올바르지 않습니다.")
         if result.state == SessionState.COMPLETED and not result.completed_commands:
             raise ValueError("완료한 명령 결과에는 완료 명령이 필요합니다.")
     elif (
@@ -220,25 +204,8 @@ def decode_result(payload: str) -> StoredResult:
     if len(payload) > 4_000_000:
         raise ValueError("저장된 결과가 허용 크기를 초과했습니다.")
     envelope = _Envelope.model_validate_json(payload)
-    if envelope.schema_version not in _READABLE_SCHEMA_VERSIONS:
+    if envelope.schema_version != STORAGE_VERSION:
         raise ValueError("지원하지 않는 결과 JSON 스키마 버전입니다.")
-    if envelope.schema_version == 1 and "document_spec" in envelope.data:
-        raise ValueError("결과 JSON 버전 1에는 문서 손상 생성 조건을 넣을 수 없습니다.")
-    if envelope.schema_version < 3 and any(
-        isinstance(specification, dict) and "technique_weights" in specification
-        for specification in (
-            envelope.data.get("practice_spec"),
-            envelope.data.get("document_spec"),
-        )
-    ):
-        raise ValueError("기술 비중 생성 조건에는 결과 JSON 버전 3이 필요합니다.")
-    specification = envelope.data.get("practice_spec")
-    if (
-        envelope.schema_version < 4
-        and isinstance(specification, dict)
-        and "code_source_id" in specification
-    ):
-        raise ValueError("코드 문서 선택 조건에는 결과 JSON 버전 4가 필요합니다.")
     result = cast(
         StoredResult,
         _ADAPTERS[envelope.kind].validate_json(_dumps(envelope.data), strict=True),
@@ -254,8 +221,10 @@ def decode_result(payload: str) -> StoredResult:
         or (result.state == SessionState.ABORTED and result.stars != 0)
     ):
         raise ValueError("저장된 결과의 상태·시간·별·시도 ID가 올바르지 않습니다.")
-    _validate_statistics(result)
-    if not isinstance(result, EditingSessionResult):
+    if isinstance(result, EditingSessionResult):
+        _validate_editing_statistics(result)
+    else:
+        _validate_typing_statistics(result)
         result = replace(result, errors=MappingProxyType(dict(result.errors)))
     return result
 

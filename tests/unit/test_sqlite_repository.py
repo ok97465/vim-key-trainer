@@ -26,20 +26,17 @@ from vim_key_trainer.domain.sessions import (
     SessionState,
     StoredResult,
 )
+from vim_key_trainer.services import sqlite_repository
 from vim_key_trainer.services.edit_problem_factory import create_edit_problem
 from vim_key_trainer.services.edit_session import EditingSession
-from vim_key_trainer.services.result_codec import (
-    RESULT_SCHEMA_VERSION,
-    decode_result,
-    encode_result,
-)
+from vim_key_trainer.services.result_codec import decode_result, encode_result
 from vim_key_trainer.services.session_service import PracticeSession
 from vim_key_trainer.services.sqlite_repository import (
-    DATABASE_SCHEMA_VERSION,
     MissionRecord,
     SourceDocumentRecord,
     SqliteResultRepository,
 )
+from vim_key_trainer.services.storage_version import STORAGE_VERSION
 
 
 def symbols(*, mistakes: int = 0, seconds: float = 3) -> SessionResult:
@@ -71,14 +68,12 @@ def commands() -> CommandSessionResult:
         keypad_errors=0,
         pause_count=1,
         reaction_times=(("h", 0.2),),
-        lesson_version=2,
         lesson_signature="command-condition",
         item_ids=("one",),
         display_count=10,
         completed_commands=1,
         command_times=(("one", 4.0),),
         commands_per_minute=15,
-        generator_version=3,
         transcript_digest="digest",
         command_samples=(CommandTiming("one", "h<C-r>", 4.0),),
     )
@@ -175,7 +170,7 @@ def test_aborted_attempt_persists_without_progress_or_rewards(tmp_path: Path) ->
         ("code_json", 60),
     ],
 )
-def test_generated_free_result_keeps_seed_length_versions_and_nonapplicable_stats(
+def test_generated_free_result_keeps_conditions_and_nonapplicable_stats(
     tmp_path: Path,
     profile_id: str,
     document_lines: int,
@@ -197,8 +192,6 @@ def test_generated_free_result_keeps_seed_length_versions_and_nonapplicable_stat
     assert not reopened.save(session.result)
     assert reopened.completed_count == 1
     assert result.practice_spec == spec
-    assert result.content_version == lesson.content_version
-    assert result.generator_version == lesson.generator_version
     assert (
         result.correct
         is result.incorrect
@@ -206,31 +199,60 @@ def test_generated_free_result_keeps_seed_length_versions_and_nonapplicable_stat
         is result.max_combo
         is None
     )
-    assert reopened.best_edit_stars(lesson.id, lesson.content_version, "free") == 3
-    assert reopened.best_edit_stars(lesson.id, lesson.content_version, "guided") == 0
+    assert reopened.best_edit_stars(lesson.id, "free") == 3
+    assert reopened.best_edit_stars(lesson.id, "guided") == 0
     reopened.close()
 
 
-def test_existing_json_practice_history_preserves_problem_signature(
-    tmp_path: Path,
+@pytest.mark.parametrize("version", [0, STORAGE_VERSION - 1, STORAGE_VERSION + 1])
+def test_different_storage_version_clears_all_history_and_can_save_again(
+    tmp_path: Path, version: int
 ) -> None:
-    fixture = (
-        Path(__file__).resolve().parents[1]
-        / "fixtures"
-        / "legacy_code_json_result_v3.json"
-    )
-    result = decode_result(fixture.read_text(encoding="utf-8"))
-    assert isinstance(result, EditingSessionResult)
-    assert result.practice_spec == EditPracticeSpec("code_json", 2**32 - 1, 60)
-    lesson = create_edit_problem(result.practice_spec)
-    assert lesson.signature == result.lesson_signature
-    repository = SqliteResultRepository(tmp_path / "legacy.sqlite3")
-    assert repository.save(result)
+    path = tmp_path / "reset.sqlite3"
+    repository = SqliteResultRepository(path)
+    previous = symbols()
+    repository.save(previous)
+    repository.register_document_catalog((source_record(),), (mission_record(),))
     repository.close()
-    reopened = SqliteResultRepository(tmp_path / "legacy.sqlite3")
-    assert reopened.load_issues == ()
-    assert reopened.results == (result,)
-    assert reopened.best_for(result) == result
+    with sqlite3.connect(path) as connection:
+        connection.execute("CREATE TABLE sqlitex_history(value TEXT)")
+        connection.execute("INSERT INTO sqlitex_history VALUES ('old record')")
+        connection.execute("UPDATE attempts SET result_json='unreadable old format'")
+        connection.execute(f"PRAGMA user_version={version}")
+    repository = SqliteResultRepository(path)
+    assert repository.load_issues == ()
+    assert repository.results == ()
+    assert repository.completed_count == 0
+    assert repository.best_stars("numbers") == 0
+    assert repository.best_for(previous) is None
+    assert repository.pending_count == 0
+    with sqlite3.connect(path) as connection:
+        assert (
+            connection.execute("PRAGMA user_version").fetchone()[0] == STORAGE_VERSION
+        )
+        for table in (
+            "attempts",
+            "lesson_progress",
+            "comparison_bests",
+            "mission_catalog",
+            "source_documents",
+        ):
+            assert (
+                connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+            )
+        assert (
+            connection.execute(
+                "SELECT name FROM sqlite_schema WHERE name='sqlitex_history'"
+            ).fetchone()
+            is None
+        )
+    current = symbols()
+    assert repository.save(current)
+    repository.close()
+    reopened = SqliteResultRepository(path)
+    assert reopened.results == (current,)
+    assert reopened.best_for(current) == current
+    assert reopened.best_stars("numbers") == 3
     reopened.close()
 
 
@@ -299,64 +321,29 @@ def test_pending_better_result_wins_when_retried_after_another_save(
     reopened.close()
 
 
-def test_future_database_version_is_rejected_without_modification(
-    tmp_path: Path,
+def test_failed_reset_rolls_back_deleted_history_and_storage_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    path = tmp_path / "future.sqlite3"
+    path = tmp_path / "reset_failure.sqlite3"
     with sqlite3.connect(path) as connection:
-        connection.execute("CREATE TABLE valuable(note TEXT)")
-        connection.execute("INSERT INTO valuable VALUES ('preserve')")
-        connection.execute(f"PRAGMA user_version={DATABASE_SCHEMA_VERSION + 1}")
-    with pytest.raises(ValueError, match="새로운"):
-        SqliteResultRepository(path)
-    with sqlite3.connect(path) as connection:
-        assert (
-            connection.execute("SELECT note FROM valuable").fetchone()[0] == "preserve"
-        )
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
-        assert (
-            connection.execute(
-                "SELECT COUNT(*) FROM sqlite_master WHERE name='attempts'"
-            ).fetchone()[0]
-            == 0
-        )
-
-
-def test_schema_creation_preserves_unrelated_existing_data(tmp_path: Path) -> None:
-    path = tmp_path / "version_zero.sqlite3"
-    with sqlite3.connect(path) as connection:
-        connection.execute("CREATE TABLE marker(value TEXT)")
-        connection.execute("INSERT INTO marker VALUES ('original')")
-    repository = SqliteResultRepository(path)
-    repository.close()
-    with sqlite3.connect(path) as connection:
-        assert (
-            connection.execute("PRAGMA user_version").fetchone()[0]
-            == DATABASE_SCHEMA_VERSION
-        )
-        assert (
-            connection.execute("SELECT value FROM marker").fetchone()[0] == "original"
-        )
-
-
-def test_failed_schema_migration_rolls_back_all_new_tables(tmp_path: Path) -> None:
-    path = tmp_path / "partial.sqlite3"
-    with sqlite3.connect(path) as connection:
-        connection.execute("CREATE TABLE attempts(original TEXT)")
-        connection.execute("INSERT INTO attempts VALUES ('preserve')")
+        connection.execute("CREATE TABLE old_history(value TEXT)")
+        connection.execute("INSERT INTO old_history VALUES ('preserve on failure')")
+        connection.execute("PRAGMA user_version=1")
+    monkeypatch.setattr(
+        sqlite_repository, "_SCHEMA", sqlite_repository._SCHEMA + ("INVALID SQL",)
+    )
     with pytest.raises(sqlite3.DatabaseError):
         SqliteResultRepository(path)
     with sqlite3.connect(path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 0
-        assert (
-            connection.execute("SELECT original FROM attempts").fetchone()[0]
-            == "preserve"
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert connection.execute("SELECT value FROM old_history").fetchone() == (
+            "preserve on failure",
         )
         assert (
             connection.execute(
-                "SELECT COUNT(*) FROM sqlite_master WHERE name='source_documents'"
-            ).fetchone()[0]
-            == 0
+                "SELECT name FROM sqlite_schema WHERE name='attempts'"
+            ).fetchone()
+            is None
         )
 
 
@@ -366,7 +353,7 @@ def test_failed_schema_migration_rolls_back_all_new_tables(tmp_path: Path) -> No
 def test_invalid_result_json_is_rejected(change: str) -> None:
     payload = json.loads(encode_result(symbols()))
     if change == "future_version":
-        payload["schema_version"] = RESULT_SCHEMA_VERSION + 1
+        payload["schema_version"] = STORAGE_VERSION + 1
     elif change == "unknown_field":
         payload["data"]["executable"] = "never execute"
     elif change == "bad_number":
@@ -398,13 +385,11 @@ def test_edit_result_rejects_unknown_fields_in_generation_conditions(
             result,
             lesson_id="mission_test",
             document_spec=DocumentPracticeSpec("mission_test", 7),
-            generator_version=1,
         )
     else:
         result = replace(
             result,
             practice_spec=EditPracticeSpec(result.lesson_id, 7),
-            generator_version=1,
         )
     payload = json.loads(encode_result(result))
     field = "document_spec" if document else "practice_spec"
@@ -413,16 +398,12 @@ def test_edit_result_rejects_unknown_fields_in_generation_conditions(
         decode_result(json.dumps(payload))
 
 
-@pytest.mark.parametrize("make_result", [symbols, commands, editing])
-def test_result_json_version_one_still_reads_existing_practice_records(
-    make_result: object,
-) -> None:
-    assert callable(make_result)
-    result: StoredResult = make_result()
-    payload = json.loads(encode_result(result))
-    payload["schema_version"] = 1
-    payload["data"].pop("document_spec", None)
-    assert decode_result(json.dumps(payload)) == result
+@pytest.mark.parametrize("version", [0, STORAGE_VERSION - 1, STORAGE_VERSION + 1])
+def test_result_json_rejects_other_storage_versions(version: int) -> None:
+    payload = json.loads(encode_result(symbols()))
+    payload["schema_version"] = version
+    with pytest.raises(ValueError, match="버전"):
+        decode_result(json.dumps(payload))
 
 
 @pytest.mark.parametrize(
@@ -432,16 +413,11 @@ def test_result_json_version_one_still_reads_existing_practice_records(
         ("max_combo", 999),
         ("extra_hints", -1),
         ("step_returns", -1),
-        ("content_version", -1),
-        ("content_version", 0),
-        ("baseline_version", -1),
-        ("game_rules_version", 0),
-        ("generator_version", -1),
         ("accuracy", 0),
         ("accuracy", None),
     ],
 )
-def test_guided_result_rejects_inconsistent_counts_versions_and_accuracy(
+def test_guided_result_rejects_inconsistent_counts_and_accuracy(
     field: str,
     invalid: object,
 ) -> None:
@@ -464,7 +440,6 @@ def test_accuracy_consistency_allows_only_roundoff_tolerance() -> None:
         ("result_kind", "wrong-kind"),
         ("state", "aborted"),
         ("lesson_id", "other_lesson"),
-        ("content_version", -1),
         ("mode", "wrong-mode"),
         ("comparison_key", "wrong-digest"),
     ],
@@ -689,14 +664,13 @@ def mission_record() -> MissionRecord:
         id="mission_readme",
         source_id="source_pinned",
         collection_id="web",
-        content_version=1,
         title="설명 복구",
         repair_count=4,
         signature="goal_signature",
     )
 
 
-def test_document_catalog_is_normalized_versioned_and_idempotent(
+def test_document_catalog_keeps_only_current_metadata_and_is_idempotent(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "training.sqlite3"
@@ -705,9 +679,7 @@ def test_document_catalog_is_normalized_versioned_and_idempotent(
     mission = mission_record()
     repository.register_document_catalog((source,), (mission,))
     repository.register_document_catalog((source,), (mission,))
-    repository.register_document_catalog(
-        (), (replace(mission, content_version=2, signature="new_goal"),)
-    )
+    repository.register_document_catalog((), (replace(mission, signature="new_goal"),))
     with sqlite3.connect(path) as connection:
         assert (
             connection.execute("SELECT COUNT(*) FROM source_documents").fetchone()[0]
@@ -715,17 +687,16 @@ def test_document_catalog_is_normalized_versioned_and_idempotent(
         )
         assert (
             connection.execute("SELECT COUNT(*) FROM mission_catalog").fetchone()[0]
-            == 2
+            == 1
         )
+        assert connection.execute(
+            "SELECT signature FROM mission_catalog"
+        ).fetchone() == ("new_goal",)
         assert connection.execute(
             "SELECT license_id,sha256 FROM source_documents"
         ).fetchone() == ("MIT", "a" * 64)
     with pytest.raises(ValueError, match="새 ID"):
         repository.register_document_catalog((replace(source, revision="mutated"),), ())
-    with pytest.raises(ValueError, match="콘텐츠 버전"):
-        repository.register_document_catalog(
-            (), (replace(mission, signature="mutated"),)
-        )
     repository.close()
 
 
@@ -750,17 +721,11 @@ def test_mission_with_fewer_than_three_repairs_is_not_registered() -> None:
         replace(mission_record(), repair_count=1)
 
 
-@pytest.mark.parametrize("change", ["lesson_id", "generator_version"])
-def test_generated_edit_result_requires_matching_profile_and_generator_version(
-    change: str,
-) -> None:
+def test_generated_edit_result_requires_matching_profile() -> None:
     result = replace(
         editing(),
         practice_spec=EditPracticeSpec("editing_numbers", 7),
-        generator_version=1,
     )
-    invalid = replace(
-        result, **{change: "editing_words" if change == "lesson_id" else 0}
-    )
+    invalid = replace(result, lesson_id="editing_words")
     with pytest.raises(ValueError, match="생성 조건"):
         decode_result(encode_result(invalid))

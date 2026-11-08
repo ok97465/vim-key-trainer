@@ -264,17 +264,9 @@ def test_code_baseline_completes_through_qt_and_keeps_mode_records_separate(
     assert page.comparison.remaining_changes == 0
     assert session.key_count == session.lesson.baseline_keys
     assert window.repository.completed_count == 1
-    assert (
-        window.repository.best_edit_stars(profile_id, profile.content_version, mode)
-        == 3
-    )
+    assert window.repository.best_edit_stars(profile_id, mode) == 3
     other_mode: EditMode = "free" if mode == "guided" else "guided"
-    assert (
-        window.repository.best_edit_stars(
-            profile_id, profile.content_version, other_mode
-        )
-        == 0
-    )
+    assert window.repository.best_edit_stars(profile_id, other_mode) == 0
     home = page.result_page.findChild(QPushButton, "editingResultHome")
     assert home is not None
     qtbot.mouseClick(home, Qt.MouseButton.LeftButton)
