@@ -7,6 +7,7 @@ from vim_key_trainer.engine.editor import (
     EditorSnapshot,
     EditorState,
     EditOutcome,
+    YankSpan,
 )
 
 __all__ = [
@@ -15,4 +16,5 @@ __all__ = [
     "EditOutcome",
     "EditorSnapshot",
     "EditorState",
+    "YankSpan",
 ]

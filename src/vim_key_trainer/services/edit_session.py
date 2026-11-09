@@ -37,7 +37,7 @@ from vim_key_trainer.domain.sessions import (
     InputResult,
     SessionState,
 )
-from vim_key_trainer.engine import EditEngine, EditorSnapshot
+from vim_key_trainer.engine import EditEngine, EditorSnapshot, YankSpan
 
 _NANOSECONDS = 1_000_000_000
 _DEFAULT_CHALLENGE = ChallengeOptions()
@@ -73,6 +73,7 @@ class EditingSession:
         self.challenge = challenge
         self.revenge_segments = revenge_segments
         self.engine = EditEngine(lesson.initial, lesson.allowed_commands)
+        self.yanked_spans: tuple[YankSpan, ...] = ()
         self.attempt_id = str(uuid4())
         self.state = SessionState.READY
         self.key_count = 0
@@ -380,6 +381,7 @@ class EditingSession:
     def _check_deadline_at(self, now_ns: int) -> bool:
         if not self._expired_at(now_ns):
             return False
+        self.yanked_spans = ()
         index = self._active_segment_index
         assert index is not None
         segment = self.segments[index]
@@ -478,6 +480,7 @@ class EditingSession:
             )
             previous_lines = self.engine.state.lines
             self.engine.restore(snapshot)
+            self.yanked_spans = ()
             self._remap_recovery_marks(previous_lines, self.engine.state.lines)
             self.step_index = next_segment.start_step
             self.token_index = 0
@@ -513,6 +516,7 @@ class EditingSession:
         self._advance_segment(self._clock_ns())
 
     def submit(self, token: KeyToken | None) -> InputResult:
+        self.yanked_spans = ()
         if token is None or self.state not in {
             SessionState.READY,
             SessionState.RUNNING,
@@ -535,6 +539,7 @@ class EditingSession:
             outcome = self._submit_guided(token)
         else:
             edit = self.engine.submit(token)
+            self.yanked_spans = edit.yanked_spans
             self.message = edit.message
             outcome = InputResult.ACCEPTED if edit.accepted else InputResult.REJECTED
         if self.bomb_enabled:
@@ -582,6 +587,7 @@ class EditingSession:
             self.message = edit.message or "가이드 기대 상태가 일치하지 않습니다."
             return InputResult.REJECTED
         self._remap_recovery_marks(snapshot.state.lines, self.engine.state.lines)
+        self.yanked_spans = edit.yanked_spans
         self._correct += 1
         self._combo += 1
         self._max_combo = max(self._max_combo, self._combo)
@@ -595,6 +601,7 @@ class EditingSession:
 
     def return_to_step(self, step_index: int | None = None) -> bool:
         """가이드 위치만 복원한다. 폭탄의 현재 구간·남은 시간·최초 판정은 유지한다."""
+        self.yanked_spans = ()
         if self.mode != "guided" or self.state not in {
             SessionState.READY,
             SessionState.RUNNING,
@@ -645,6 +652,7 @@ class EditingSession:
         self._running_since_ns = None
 
     def pause(self) -> None:
+        self.yanked_spans = ()
         if self.state not in {SessionState.READY, SessionState.RUNNING}:
             return
         now_ns = self._clock_ns()
@@ -659,6 +667,7 @@ class EditingSession:
         self._generation += 1
 
     def resume(self) -> None:
+        self.yanked_spans = ()
         if self.state != SessionState.PAUSED or self.recovery_error is not None:
             return
         if self._paused_from_ready:
@@ -669,6 +678,7 @@ class EditingSession:
         self._generation += 1
 
     def abort(self) -> None:
+        self.yanked_spans = ()
         if self.state in {SessionState.COMPLETED, SessionState.ABORTED}:
             return
         now_ns = self._clock_ns()

@@ -72,6 +72,7 @@ class EditComparison(QWidget):
         return area
 
     def show_documents(self, current: EditorState, goal: EditorState) -> None:
+        self.practice_input.clear_yank_highlight()
         self._goal_position = None
         self.goal_document.show_state(goal)
         self.current_scroll.verticalScrollBar().setValue(0)
@@ -271,6 +272,8 @@ class EditComparison(QWidget):
         return super().eventFilter(watched, event)
 
     def set_paused(self, paused: bool) -> None:
+        if paused:
+            self.practice_input.clear_yank_highlight()
         self.practice_input.paused = paused
         self.practice_input.update()
         self.guide_overlay.set_paused(paused)

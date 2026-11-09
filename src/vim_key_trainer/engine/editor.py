@@ -250,11 +250,25 @@ class EditorState:
 
 
 @dataclass(frozen=True, slots=True)
+class YankSpan:
+    """복사한 원본의 행·열 범위. end는 배타적이며 빈 줄은 start == end다."""
+
+    row: int
+    start: int
+    end: int
+
+    def __post_init__(self) -> None:
+        if self.row < 0 or self.start < 0 or self.end < self.start:
+            raise ValueError("잘못된 복사 범위입니다.")
+
+
+@dataclass(frozen=True, slots=True)
 class EditOutcome:
     accepted: bool
     message: str = ""
     command: str | None = None
     changed: bool = False
+    yanked_spans: tuple[YankSpan, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -1378,6 +1392,45 @@ class EditEngine:
         else:
             self._registers["-"] = (text, kind)
 
+    def _yank_outcome(
+        self,
+        text: tuple[str, ...],
+        kind: str,
+        spans: tuple[YankSpan, ...],
+        command: str,
+    ) -> EditOutcome:
+        """명시적인 복사만 일회성 범위를 반환한다. 레지스터 내용과 독립적이다."""
+        self._write_register(text, kind, yank=True)
+        return EditOutcome(
+            True,
+            command=command,
+            yanked_spans=spans if self._selected_register != "_" else (),
+        )
+
+    @staticmethod
+    def _yank_spans(
+        lines: tuple[str, ...], start: int, end: int, *, linewise: bool = False
+    ) -> tuple[YankSpan, ...]:
+        """엔진의 원본 offset을 표시 가능한 행별 범위로 나눈다."""
+        if end <= start:
+            return ()
+        first, start_column = EditEngine._position(lines, start)
+        last, end_column = EditEngine._position(lines, end - 1)
+        if linewise:
+            return tuple(
+                YankSpan(row, 0, len(lines[row])) for row in range(first, last + 1)
+            )
+        return tuple(
+            YankSpan(
+                row,
+                start_column if row == first else 0,
+                min(len(lines[row]), end_column + 1)
+                if row == last
+                else len(lines[row]),
+            )
+            for row in range(first, last + 1)
+        )
+
     @staticmethod
     def _difference(before: tuple[str, ...], after: tuple[str, ...]) -> tuple[int, str]:
         original, changed = "\n".join(before), "\n".join(after)
@@ -1489,8 +1542,20 @@ class EditEngine:
                 insertion = self._position(self._state.lines, offset)
             if op == "y":
                 self._state = before
-                self._write_register(text, kind, yank=True)
-                return EditOutcome(True, command=command)
+                if kind == "line":
+                    start, end = self._line_span(
+                        before.lines,
+                        before.row,
+                        min(len(before.lines) - 1, before.row + count - 1),
+                    )
+                else:
+                    start, end = offset, offset + len(removed)
+                return self._yank_outcome(
+                    text,
+                    kind,
+                    self._yank_spans(before.lines, start, end, linewise=kind == "line"),
+                    command,
+                )
             if before.lines != self._state.lines:
                 self._write_register(text, kind)
             if op == "c":
@@ -1624,8 +1689,17 @@ class EditEngine:
         else:
             selected = tuple(text[start:end].split("\n"))
         if op == "y":
-            self._write_register(selected, "line" if linewise else "char", yank=True)
-            return EditOutcome(True, command=command)
+            spans = (
+                tuple(
+                    YankSpan(row, 0, len(before.lines[row]))
+                    for row in range(first, last + 1)
+                )
+                if linewise
+                else self._yank_spans(before.lines, start, end)
+            )
+            return self._yank_outcome(
+                selected, "line" if linewise else "char", spans, command
+            )
         if op in {">", "<"}:
             shifted_lines = list(before.lines)
             for row in range(first, last + 1):
@@ -2432,11 +2506,15 @@ class EditEngine:
             pieces = tuple(line[left : right + 1] for line in lines[top : bottom + 1])
             self._state = before
             if command == "y":
-                self._write_register(pieces, "block", yank=True)
                 self._state = replace(
                     before, row=top, column=min(left, max(0, len(lines[top]) - 1))
                 )
-                return EditOutcome(True, command=command)
+                spans = tuple(
+                    YankSpan(row, left, min(right + 1, len(lines[row])))
+                    for row in range(top, bottom + 1)
+                    if left < len(lines[row])
+                )
+                return self._yank_outcome(pieces, "block", spans, command)
             if command in {"d", "x", "c", "s"}:
                 self._write_register(pieces, "block")
                 for row in range(top, bottom + 1):

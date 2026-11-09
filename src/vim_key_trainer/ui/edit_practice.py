@@ -180,6 +180,7 @@ class EditPracticePage(QWidget):
         self.repair_effects = RepairEffects(self.comparison)
         self.repair_effects.configure_effects(self.presentation)
         self.practice_input = self.comparison.practice_input
+        self.practice_input.set_yank_enabled(self.presentation.effects)
         self.goal_document = self.comparison.goal_document
         self.document_scroll = self.comparison.current_scroll
         self.practice_input.key_received.connect(self._receive_key)
@@ -365,6 +366,7 @@ class EditPracticePage(QWidget):
         self.presentation = presentation
         self.challenge_status.configure_effects(presentation)
         self.repair_effects.configure_effects(presentation)
+        self.practice_input.set_yank_enabled(presentation.effects)
         self.result_audio.configure(presentation)
 
     def configure_appearance(self, appearance: AppearanceSettings) -> None:
@@ -997,6 +999,8 @@ class EditPracticePage(QWidget):
                 )
             )
         self._refresh()
+        if outcome == InputResult.ACCEPTED:
+            self.practice_input.show_yank(session.yanked_spans)
         self._handle_session_state()
 
     def _handle_session_state(self) -> None:
@@ -1185,6 +1189,7 @@ class EditPracticePage(QWidget):
     def return_to_step(self) -> None:
         session = self.session
         if session is not None:
+            self.practice_input.clear_yank_highlight()
             session.return_to_step()
             self.feedback.setText(session.message)
             self._refresh()
@@ -1206,6 +1211,7 @@ class EditPracticePage(QWidget):
 
     def abort(self) -> None:
         self.timer.stop()
+        self.practice_input.clear_yank_highlight()
         self.result_audio.stop()
         self.challenge_status.stop_effects()
         self.repair_effects.stop_effects()

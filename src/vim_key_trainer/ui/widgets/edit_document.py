@@ -5,12 +5,13 @@ from collections import defaultdict
 from math import ceil
 
 # Third party imports
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QRectF, Qt, QTimer
 from PySide6.QtGui import (
     QColor,
     QFont,
     QFontDatabase,
     QFontMetricsF,
+    QHideEvent,
     QKeyEvent,
     QMouseEvent,
     QPainter,
@@ -24,7 +25,7 @@ from vim_key_trainer.domain.document_display import (
     TextSpan,
     lexical_spans,
 )
-from vim_key_trainer.engine import EditorState
+from vim_key_trainer.engine import EditorState, YankSpan
 from vim_key_trainer.ui.qt_input import NormalizedKey, normalize_key_event
 from vim_key_trainer.ui.widgets.practice_input import PracticeInput
 
@@ -42,6 +43,9 @@ _SYNTAX_COLORS = {
 _CHANGE_COLORS = {"replace": "#f0c76d", "insert": "#76cafa", "delete": "#ef9b9b"}
 _CURRENT_BACKGROUNDS = {"replace": "#4b3528", "insert": "#17394a", "delete": "#502c37"}
 _GOAL_BACKGROUNDS = {"replace": "#494127", "insert": "#1c4252", "delete": "#502c37"}
+_YANK_BACKGROUND = "#1c363c"
+_YANK_BORDER = "#78c9cf"
+_YANK_DURATION_MS = 400
 
 
 def _spans_by_row(spans: tuple[TextSpan, ...]) -> dict[int, list[TextSpan]]:
@@ -66,6 +70,13 @@ class EditDocument(PracticeInput):
         self.change_spans: tuple[TextSpan, ...] = ()
         self._syntax_by_row: dict[int, list[TextSpan]] = {}
         self._changes_by_row: dict[int, list[TextSpan]] = {}
+        self.yank_spans: tuple[YankSpan, ...] = ()
+        self._yanks_by_row: dict[int, list[YankSpan]] = {}
+        self._yank_enabled = True
+        self._yank_timer = QTimer(self)
+        self._yank_timer.setSingleShot(True)
+        self._yank_timer.setInterval(_YANK_DURATION_MS)
+        self._yank_timer.timeout.connect(self.clear_yank_highlight)
         self.recovery_marks: tuple[tuple[int, str], ...] = ()
         self.success_marks: tuple[tuple[int, str], ...] = ()
         self._layout_key: tuple[tuple[str, ...], int, int] | None = None
@@ -88,6 +99,8 @@ class EditDocument(PracticeInput):
         return self._document_font()
 
     def show_state(self, state: EditorState) -> None:
+        if state.lines != self.editor_state.lines or state.mode != "normal":
+            self.clear_yank_highlight()
         if state.lines != self.editor_state.lines:
             self.syntax_spans = lexical_spans(state.lines, self.language)
             self._syntax_by_row = _spans_by_row(self.syntax_spans)
@@ -140,6 +153,36 @@ class EditDocument(PracticeInput):
         self._changes_by_row = _spans_by_row(spans)
         self.update()
 
+    def set_yank_enabled(self, enabled: bool) -> None:
+        self._yank_enabled = enabled
+        if not enabled:
+            self.clear_yank_highlight()
+
+    def show_yank(self, spans: tuple[YankSpan, ...]) -> None:
+        """이번 복사만 잠깐 표시한다. 같은 범위를 재복사해도 만료를 다시 센다."""
+        if not spans or self.read_only or self.paused or not self._yank_enabled:
+            return
+        if any(
+            span.row >= len(self.editor_state.lines)
+            or span.end > len(self.editor_state.lines[span.row])
+            for span in spans
+        ):
+            raise ValueError("복사 강조 범위가 표시 문서를 벗어났습니다.")
+        self.yank_spans = spans
+        self._yanks_by_row = defaultdict(list)
+        for span in spans:
+            self._yanks_by_row[span.row].append(span)
+        # 하나의 타이머를 재시작하므로 이전 복사의 만료가 새 표시를 지우지 않는다.
+        self._yank_timer.start()
+        self.update()
+
+    def clear_yank_highlight(self) -> None:
+        self._yank_timer.stop()
+        if self.yank_spans:
+            self.yank_spans = ()
+            self._yanks_by_row = {}
+            self.update()
+
     def show_recovery_marks(self, marks: tuple[tuple[int, str], ...]) -> None:
         """복구 표식은 차이 강조를 덮지 않고 줄 번호 옆 여백에 표시한다."""
         if marks == self.recovery_marks:
@@ -162,7 +205,7 @@ class EditDocument(PracticeInput):
             + "\n".join(f"✓ {row + 1}행 · {text}" for row, text in self.success_marks)
         )
 
-    def _span_rect(self, span: TextSpan, metrics: QFontMetricsF) -> QRectF:
+    def _span_rect(self, span: TextSpan | YankSpan, metrics: QFontMetricsF) -> QRectF:
         line = self.editor_state.lines[span.row]
         return QRectF(
             58 + metrics.horizontalAdvance(line[: span.start]),
@@ -204,6 +247,20 @@ class EditDocument(PracticeInput):
                 Qt.AlignmentFlag.AlignLeft,
                 self.editor_state.lines[row][span.start : span.end],
             )
+
+    def _paint_yank_highlights(
+        self, painter: QPainter, row: int, metrics: QFontMetricsF
+    ) -> None:
+        for span in self._yanks_by_row.get(row, ()):
+            box = self._span_rect(span, metrics)
+            if span.start == span.end:
+                box.setWidth(metrics.horizontalAdvance(" "))
+            # 아래 수정 밑줄을 남기고, 테두리는 블록 커서 밖으로 내어 한 글자·
+            # 빈 줄 복사도 보이게 한다. 구문 문자색과 커서는 이 위에 그린다.
+            box.adjust(-0.5, -0.5, 0.5, -2.5)
+            painter.fillRect(box, QColor(_YANK_BACKGROUND))
+            painter.setPen(QPen(QColor(_YANK_BORDER), 1))
+            painter.drawRect(box)
 
     def line_number_text(self, row: int) -> str:
         """입력 문서는 현재 행의 절대 번호와 다른 행의 상대 거리를 표시한다."""
@@ -276,6 +333,10 @@ class EditDocument(PracticeInput):
         else:
             super().mousePressEvent(event)
 
+    def hideEvent(self, event: QHideEvent) -> None:
+        self.clear_yank_highlight()
+        super().hideEvent(event)
+
     def paintEvent(self, event: QPaintEvent) -> None:
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor("#151d28"))
@@ -299,6 +360,7 @@ class EditDocument(PracticeInput):
             line = state.lines[row]
             y = 16 + row * metrics.lineSpacing()
             self._paint_change_backgrounds(painter, row, metrics)
+            self._paint_yank_highlights(painter, row, metrics)
             self._paint_selection(painter, row, metrics)
             painter.setPen(
                 QColor(
