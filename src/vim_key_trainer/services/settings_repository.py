@@ -14,9 +14,10 @@ from platformdirs import user_config_path
 
 # Local imports
 from vim_key_trainer.domain.challenge import ChallengeOptions
+from vim_key_trainer.domain.editing import EditMode
 from vim_key_trainer.domain.preferences import AppearanceSettings, PresentationSettings
 
-SETTINGS_VERSION = 1
+SETTINGS_VERSION = 2
 _MAX_SETTINGS_BYTES = 16_384
 
 
@@ -27,6 +28,7 @@ class AppSettings:
     font_size: int = 12
     record_rival: bool = False
     appearance: AppearanceSettings = field(default_factory=AppearanceSettings)
+    edit_mode: EditMode = "guided"
 
     def __post_init__(self) -> None:
         if not isinstance(self.challenge, ChallengeOptions) or not isinstance(
@@ -39,6 +41,8 @@ class AppSettings:
             raise ValueError("개인 기록 표시는 참/거짓이어야 합니다.")
         if not isinstance(self.appearance, AppearanceSettings):
             raise ValueError("꾸미기 설정이 올바르지 않습니다.")
+        if type(self.edit_mode) is not str or self.edit_mode not in {"guided", "free"}:
+            raise ValueError("문서 수정 풀이 방식이 올바르지 않습니다.")
 
 
 def default_settings_path() -> Path:
@@ -72,6 +76,7 @@ class SettingsRepository:
                     "font_size",
                     "record_rival",
                     "appearance",
+                    "edit_mode",
                 },
             )
             if type(data["version"]) is not int or data["version"] != SETTINGS_VERSION:
@@ -100,6 +105,7 @@ class SettingsRepository:
                         data["appearance"], {"mascot", "fuse", "stamp", "decorations"}
                     )
                 ),
+                edit_mode=data["edit_mode"],
             )
         except FileNotFoundError:
             return AppSettings()

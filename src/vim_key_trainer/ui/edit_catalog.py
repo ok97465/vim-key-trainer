@@ -26,7 +26,7 @@ from vim_key_trainer.domain.edit_generator import (
     list_edit_profiles,
 )
 from vim_key_trainer.domain.editing import EditMode
-from vim_key_trainer.domain.preferences import AppearanceSettings
+from vim_key_trainer.domain.preferences import AppearanceSettings, PresentationSettings
 from vim_key_trainer.domain.sessions import EditingSessionResult
 from vim_key_trainer.services.result_repository import ResultRepository
 from vim_key_trainer.ui.components import button, label, scroll_page
@@ -235,6 +235,12 @@ class EditCategoryPage(QWidget):
 
     def configure_appearance(self, settings: AppearanceSettings) -> None:
         self.workshop.configure_appearance(settings)
+
+    def configure_effects(self, settings: PresentationSettings) -> None:
+        self.workshop.configure_effects(settings)
+
+    def stop_effects(self) -> None:
+        self.workshop.art.stop_effects()
 
     def refresh(self, repository: ResultRepository) -> None:
         completed = sum(

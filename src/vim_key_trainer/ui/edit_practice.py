@@ -60,6 +60,10 @@ from vim_key_trainer.domain.editing import (
     EditPracticeSpec,
     random_edit_document_lines,
 )
+from vim_key_trainer.domain.free_repair_progress import (
+    FreeRepairProgress,
+    FreeRepairSnapshot,
+)
 from vim_key_trainer.domain.preferences import AppearanceSettings, PresentationSettings
 from vim_key_trainer.domain.sessions import (
     EditingSessionResult,
@@ -74,13 +78,18 @@ from vim_key_trainer.services.document_problem_factory import (
 from vim_key_trainer.services.edit_problem_factory import create_edit_problem
 from vim_key_trainer.services.edit_session import EditingSession
 from vim_key_trainer.services.result_repository import ResultRepository
-from vim_key_trainer.ui.challenge_audio import ChallengeAudio
+from vim_key_trainer.ui.challenge_audio import ChallengeAudio, SoundCue
+from vim_key_trainer.ui.challenge_feedback import is_close_call, segment_technique
 from vim_key_trainer.ui.components import button, label, scroll_page
 from vim_key_trainer.ui.game_resources import game_resource_path
 from vim_key_trainer.ui.qt_input import NormalizedKey
+from vim_key_trainer.ui.widgets.challenge_finale import ChallengeFinale
+from vim_key_trainer.ui.widgets.challenge_pressure import ChallengePressure
 from vim_key_trainer.ui.widgets.challenge_rival import ChallengeRivalStatus
 from vim_key_trainer.ui.widgets.challenge_status import ChallengeStatus
 from vim_key_trainer.ui.widgets.edit_comparison import EditComparison
+from vim_key_trainer.ui.widgets.expiration_effect import ExpirationEffect
+from vim_key_trainer.ui.widgets.free_repair_status import FreeRepairStatus
 from vim_key_trainer.ui.widgets.repair_effects import RepairEffects
 
 
@@ -94,6 +103,7 @@ class EditPracticePage(QWidget):
         *,
         technique_weights: Callable[[], EditTechniqueWeights] | None = None,
         challenge: ChallengeOptions | None = None,
+        default_mode: EditMode = "guided",
         presentation: PresentationSettings | None = None,
         record_rival: bool = False,
         appearance: AppearanceSettings | None = None,
@@ -102,6 +112,9 @@ class EditPracticePage(QWidget):
         self.repository = repository
         self._technique_weights = technique_weights
         self.default_challenge = challenge or ChallengeOptions()
+        if default_mode not in {"guided", "free"}:
+            raise ValueError("지원하지 않는 기본 풀이 방식입니다.")
+        self.default_mode = default_mode
         self.presentation = presentation or PresentationSettings()
         self.record_rival_enabled = record_rival
         self.appearance = appearance or AppearanceSettings()
@@ -109,6 +122,10 @@ class EditPracticePage(QWidget):
         self.result_audio.configure(self.presentation)
         self._timer_guard: TimerGuard | None = None
         self._guide_goal_positions: dict[int, tuple[int, int] | None] = {}
+        self._free_repairs: FreeRepairProgress | None = None
+        self._free_snapshot: FreeRepairSnapshot | None = None
+        self._expiration_attempt_id: str | None = None
+        self._seen_expirations = 0
         self.session: EditingSession | None = None
         self.last_result: EditingSessionResult | None = None
         self._switching = False
@@ -128,6 +145,8 @@ class EditPracticePage(QWidget):
         self.stack = QStackedWidget()
         self.stack.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         root.addWidget(self.stack)
+        self.expiration_effect = ExpirationEffect(self)
+        self.expiration_effect.configure_effects(self.presentation)
         self.practice_page = self._make_practice_page()
         self.result_page = self._make_result_page()
         self.stack.addWidget(self.practice_page)
@@ -176,7 +195,17 @@ class EditPracticePage(QWidget):
         self.challenge_status.configure_appearance(self.appearance)
         self.challenge_status.hide()
         layout.addWidget(self.challenge_status)
+        self.free_repair_status = FreeRepairStatus()
+        self.free_repair_status.configure_effects(self.presentation)
+        self.free_repair_status.hide()
+        layout.addWidget(self.free_repair_status)
         self.comparison = EditComparison()
+        self.pressure_frame = ChallengePressure(self.comparison)
+        self.pressure_frame.configure_effects(self.presentation)
+        self.challenge_status.pressure_changed.connect(self.pressure_frame.set_pressure)
+        self.challenge_status.motion_timer.timeout.connect(
+            lambda: self.pressure_frame.set_phase(self.challenge_status.motion_phase)
+        )
         self.repair_effects = RepairEffects(self.comparison)
         self.repair_effects.configure_effects(self.presentation)
         self.practice_input = self.comparison.practice_input
@@ -213,6 +242,7 @@ class EditPracticePage(QWidget):
         self.mode_combo.setAccessibleName("편집 풀이 방식")
         self.mode_combo.addItem("가이드 풀이", "guided")
         self.mode_combo.addItem("자유 풀이", "free")
+        self.mode_combo.setCurrentIndex(0 if self.default_mode == "guided" else 1)
         self.mode_combo.currentIndexChanged.connect(self._mode_changed)
         options.addWidget(self.mode_combo)
         self.document_combo = QComboBox()
@@ -274,7 +304,7 @@ class EditPracticePage(QWidget):
         self.rival_status = ChallengeRivalStatus(self.repository)
         self.rival_status.message.setMinimumWidth(0)
         self.rival_status.message.setWordWrap(True)
-        self.rival_status.reference_progress.setFixedWidth(40)
+        self.rival_status.race_track.setMinimumWidth(125)
         row.addWidget(self.rival_status, 1)
         self.challenge_combo.currentIndexChanged.connect(self._challenge_changed)
         self.difficulty_combo.currentIndexChanged.connect(self._challenge_changed)
@@ -339,7 +369,14 @@ class EditPracticePage(QWidget):
     def _challenge_changed(self) -> None:
         if self._switching:
             return
+        previous_auto_repair = self.default_challenge.auto_repair
         self.default_challenge = self._selected_challenge()
+        if self.session is not None and self.session.mode == "free":
+            # 자유 풀이에서 꺼진 자동 수정은 해당 시도의 제약이다.
+            # 난이도·도전 종류만 바꿀 때 가이드용 선호까지 덮지 않는다.
+            self.default_challenge = replace(
+                self.default_challenge, auto_repair=previous_auto_repair
+            )
         self.preferences_changed.emit()
         if self.session is not None and not self._started:
             lesson = self.session.lesson
@@ -364,10 +401,14 @@ class EditPracticePage(QWidget):
 
     def configure_effects(self, presentation: PresentationSettings) -> None:
         self.presentation = presentation
+        self.expiration_effect.configure_effects(presentation)
         self.challenge_status.configure_effects(presentation)
         self.repair_effects.configure_effects(presentation)
         self.practice_input.set_yank_enabled(presentation.effects)
         self.result_audio.configure(presentation)
+        self.pressure_frame.configure_effects(presentation)
+        self.result_finale.configure_effects(presentation)
+        self.free_repair_status.configure_effects(presentation)
 
     def configure_appearance(self, appearance: AppearanceSettings) -> None:
         self.appearance = appearance
@@ -488,13 +529,20 @@ class EditPracticePage(QWidget):
 
     def hideEvent(self, event: QHideEvent) -> None:
         try:
-            self.result_audio.stop()
-            self.challenge_status.stop_effects()
-            self.repair_effects.stop_effects()
+            self._stop_effects()
         except RuntimeError:
             # QApplication 종료 시에는 자식 Qt 객체가 먼저 해제될 수 있다.
             pass
         super().hideEvent(event)
+
+    def _stop_effects(self) -> None:
+        self.result_audio.stop()
+        self.challenge_status.stop_effects()
+        self.repair_effects.stop_effects()
+        self.pressure_frame.stop_effects()
+        self.result_finale.stop_effects()
+        self.free_repair_status.stop_effects()
+        self.expiration_effect.stop_effects()
 
     def _make_result_page(self) -> QWidget:
         page, layout = scroll_page()
@@ -511,6 +559,9 @@ class EditPracticePage(QWidget):
         layout.addLayout(heading)
         self.result_context = label("", "muted", wrap=True)
         layout.addWidget(self.result_context)
+        self.result_finale = ChallengeFinale()
+        self.result_finale.configure_effects(self.presentation)
+        layout.addWidget(self.result_finale)
         card = QFrame()
         card.setObjectName("card")
         card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
@@ -576,13 +627,18 @@ class EditPracticePage(QWidget):
     def prepare(
         self,
         lesson: EditLesson,
-        mode: EditMode = "guided",
+        mode: EditMode | None = None,
         *,
         font_size: int | None = None,
         random_document: bool | None = None,
         challenge: ChallengeOptions | None = None,
         prepared_session: EditingSession | None = None,
     ) -> None:
+        requested_mode = (
+            prepared_session.mode if prepared_session else mode or self.default_mode
+        )
+        mode_fallback = requested_mode == "free" and not lesson.free_enabled
+        mode = "guided" if mode_fallback else requested_mode
         selected = challenge or self.default_challenge
         reason = bomb_unavailable_reason(lesson, mode)
         if selected.kind == "bomb" and reason:
@@ -596,6 +652,13 @@ class EditPracticePage(QWidget):
         try:
             self.abort()
             self.session = next_session
+            self._free_repairs = (
+                FreeRepairProgress(lesson.initial.lines, lesson.goal_lines)
+                if next_session.mode == "free"
+                else None
+            )
+            self._free_snapshot = None
+            self.free_repair_status.clear()
             self._guide_goal_positions.clear()
             self._started = False
             self._mission = (
@@ -653,10 +716,16 @@ class EditPracticePage(QWidget):
                 lesson.initial, EditorState(lesson.goal_lines)
             )
             self.practice_input.setEnabled(False)
+            fallback_message = (
+                "이 과제는 가이드 풀이만 지원합니다. 자유 풀이 선택은 유지됩니다."
+                if mode_fallback
+                else ""
+            )
+            self.mode_combo.setToolTip(fallback_message)
+            challenge_message = f"일반 연습 · {reason}" if reason else ""
             self.feedback.setText(
-                f"일반 연습 · {reason}"
-                if reason
-                else "연습 시작 후 첫 입력부터 시간을 잽니다."
+                f"{fallback_message} {challenge_message}".strip()
+                or "연습 시작 후 첫 입력부터 시간을 잽니다."
             )
             self.stack.setCurrentWidget(self.practice_page)
             self._refresh()
@@ -803,11 +872,13 @@ class EditPracticePage(QWidget):
         )
 
     def _mode_changed(self) -> None:
-        if self.session is not None and not self._started:
+        if not self._switching and self.session is not None and not self._started:
             mode: EditMode = "guided" if self.mode_combo.currentIndex() == 0 else "free"
+            self.default_mode = mode
             self.prepare(
                 self.session.lesson, mode, font_size=self.practice_input.font_size
             )
+            self.preferences_changed.emit()
 
     def _font_changed(self, size: int) -> None:
         self.comparison.set_font_size(size)
@@ -1008,8 +1079,7 @@ class EditPracticePage(QWidget):
             self._finish()
         elif session.state == SessionState.PAUSED:
             self.timer.stop()
-            self.challenge_status.stop_effects()
-            self.repair_effects.stop_effects()
+            self._stop_effects()
             self.comparison.set_paused(True)
             self.pause_button.setText(
                 "복구 오류" if session.recovery_error else "연습 재개"
@@ -1034,18 +1104,51 @@ class EditPracticePage(QWidget):
                 for mark in self.session.recovery_marks
             )
         )
-        self.practice_input.show_success_marks(
-            tuple(
-                (mark.row, f"{mark.segment_id} · {mark.text}")
-                for mark in self.session.success_marks
-            )
-        )
         self.command_prompt.setText(self.session.engine.state.command_line)
         self.command_prompt.setVisible(bool(self.session.engine.state.command_line))
         self._show_repair_progress(self.comparison.remaining_changes)
         self._refresh_guide()
         self.repair_effects.set_session(self.session)
+        self._refresh_free_repairs()
         self._refresh_metrics()
+        snapshot = self._free_snapshot
+        if snapshot is not None and snapshot.events:
+            self.repair_effects.show_free_repairs(snapshot.events)
+            if self.session.state == SessionState.RUNNING:
+                event = snapshot.events[-1]
+                audio = (
+                    self.challenge_status.audio
+                    if self.session.bomb_enabled
+                    else self.result_audio
+                )
+                # 하나의 명령으로 여러 곳을 고쳐도 음성은 한 묶음만 재생한다.
+                audio.play(
+                    "success",
+                    chain=snapshot.first_solved,
+                    technique=event.technique,
+                )
+
+    def _refresh_free_repairs(self) -> None:
+        session = self.session
+        if session is None:
+            return
+        marks = tuple(
+            (mark.row, f"{mark.segment_id} · {mark.text}")
+            for mark in session.success_marks
+        )
+        if self._free_repairs is not None:
+            self._free_snapshot = self._free_repairs.update(
+                session.engine.state,
+                diff=self.comparison.diff,
+                celebrate=self._started
+                and session.state in {SessionState.RUNNING, SessionState.COMPLETED},
+            )
+            self.free_repair_status.set_progress(self._free_snapshot)
+            marks += self._free_snapshot.marks
+        else:
+            self._free_snapshot = None
+            self.free_repair_status.clear()
+        self.practice_input.show_success_marks(marks)
 
     def _guide_goal_position(self) -> tuple[int, int] | None:
         session = self.session
@@ -1115,6 +1218,7 @@ class EditPracticePage(QWidget):
         if session is None:
             return
         self.challenge_status.set_session(session)
+        self._refresh_expiration_effect(session)
         self.rival_status.set_session(session, enabled=self.record_rival_enabled)
         editor = session.engine.state
         self.metrics["mode"].setText(
@@ -1136,6 +1240,25 @@ class EditPracticePage(QWidget):
             else "자유 풀이"
         )
 
+    def _refresh_expiration_effect(self, session: EditingSession) -> None:
+        if self._expiration_attempt_id != session.attempt_id:
+            self.expiration_effect.stop_effects()
+            self._expiration_attempt_id = session.attempt_id
+            self._seen_expirations = 0
+        fresh = session.timeout_count > self._seen_expirations
+        # 화면에 나타내지 않은 만료도 소비하여 재개·설정 변경 때 재생하지 않는다.
+        self._seen_expirations = session.timeout_count
+        if (
+            fresh
+            and session.mode == "free"
+            and session.state == SessionState.RUNNING
+            and self.presentation.effects
+            and self._started
+            and self.isVisible()
+            and self.stack.currentWidget() is self.practice_page
+        ):
+            self.expiration_effect.trigger(self.window())
+
     def _focus_lost(self, reason: Qt.FocusReason) -> None:
         if reason == Qt.FocusReason.MouseFocusReason and QApplication.focusWidget() in (
             self.pause_button,
@@ -1147,6 +1270,7 @@ class EditPracticePage(QWidget):
             self.pause()
 
     def pause(self) -> None:
+        self._stop_effects()
         if (
             self.session is None
             or not self._started
@@ -1209,9 +1333,11 @@ class EditPracticePage(QWidget):
     def abort(self) -> None:
         self.timer.stop()
         self.practice_input.clear_yank_highlight()
-        self.result_audio.stop()
-        self.challenge_status.stop_effects()
-        self.repair_effects.stop_effects()
+        self._stop_effects()
+        self.result_finale.clear()
+        self.free_repair_status.clear()
+        self._free_repairs = None
+        self._free_snapshot = None
         self._close_source_dialog()
         if self.session is not None:
             self.session.abort()
@@ -1385,17 +1511,34 @@ class EditPracticePage(QWidget):
         if session is None or session.result is None:
             return
         result = session.result
+        if (
+            self.last_result is not None
+            and self.last_result.attempt_id == result.attempt_id
+            and self.stack.currentWidget() is self.result_page
+        ):
+            return
         self.last_result = result
         new_best = self.repository.save(result)
         self.timer.stop()
-        self.challenge_status.stop_effects()
-        self.repair_effects.stop_effects()
+        self._stop_effects()
         challenge = result.challenge
         if challenge is not None and challenge.segments:
             final = challenge.segments[-1]
+            cue: SoundCue
+            if challenge.full_clear:
+                cue = "finale"
+            elif final.verdict == "direct" or session.mode == "free":
+                cue = "success"
+            else:
+                cue = "timeout"
             self.result_audio.play(
-                "success" if final.verdict == "direct" else "timeout"
+                cue,
+                chain=session.chain,
+                technique=segment_technique(session, final.segment_id),
+                close_call=is_close_call(final),
             )
+        elif session.mode == "free":
+            self.result_audio.play("finale")
         self.result_mascot.setVisible(
             challenge is not None and self.appearance.decorations
         )
@@ -1408,15 +1551,15 @@ class EditPracticePage(QWidget):
             )
             + f"\n보너스 {result.bonus_points:,}점"
         )
-        self.result_title.setText(
-            "문서 수정 완료"
-            if challenge is None
-            else "복수전 완료"
-            if challenge.revenge_of and challenge.full_clear
-            else "폭탄 도전 클리어!"
-            if challenge.full_clear
-            else "놓친 구간을 다시 연습해요"
-        )
+        if challenge is None:
+            title = "문서 수정 완료"
+        elif challenge.full_clear:
+            title = "복수전 완료" if challenge.revenge_of else "폭탄 도전 클리어!"
+        elif session.mode == "free":
+            title = "자유 복구 완료 · 제한시간 초과"
+        else:
+            title = "놓친 구간을 다시 연습해요"
+        self.result_title.setText(title)
         self.result_challenge.setVisible(challenge is not None)
         self.failure_examples.setVisible(bool(session.failure_examples))
         self.revenge_button.setVisible(
@@ -1486,3 +1629,4 @@ class EditPracticePage(QWidget):
             ).setFocus()
         finally:
             self._switching = False
+        self.result_finale.present(result)
