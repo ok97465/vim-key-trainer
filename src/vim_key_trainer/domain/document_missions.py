@@ -45,8 +45,6 @@ class MissionSource:
     license_id: str
     license_url: str
     license_raw_url: str
-    sha256: str
-    license_sha256: str
     language: DocumentLanguage
     source_path: str
     license_path: str

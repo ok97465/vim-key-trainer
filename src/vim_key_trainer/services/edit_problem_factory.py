@@ -28,30 +28,5 @@ def create_edit_problem(spec: EditPracticeSpec) -> EditLesson:
         or len(lesson.initial.lines) != spec.document_lines
     ):
         raise ValueError("생성된 편집 문제의 재현 조건이 요청과 다릅니다.")
-    if sources:
-        excerpt = lesson.code_excerpt
-        original = next(
-            (entry for entry in sources if excerpt and entry.source == excerpt.source),
-            None,
-        )
-        if (
-            excerpt is None
-            or original is None
-            or excerpt.source.language != profile.language
-            or (
-                spec.code_source_id is not None
-                and excerpt.source.id != spec.code_source_id
-            )
-            or excerpt.start_line < excerpt.source.excerpt_start
-            or excerpt.end_line > excerpt.source.excerpt_end
-            or excerpt.lines != lesson.goal_lines
-            or excerpt.lines
-            != original.lines[
-                excerpt.start_line - excerpt.source.excerpt_start : excerpt.end_line
-                - excerpt.source.excerpt_start
-                + 1
-            ]
-        ):
-            raise ValueError("생성된 코드의 원문·발췌 범위가 검증한 출처와 다릅니다.")
     validate_edit_replay(lesson)
     return lesson

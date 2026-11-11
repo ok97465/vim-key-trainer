@@ -179,7 +179,6 @@ class EditLesson:
             (
                 excerpt.source.id,
                 excerpt.source.revision,
-                excerpt.source.sha256,
                 excerpt.source.transformation,
                 excerpt.start_line,
                 excerpt.end_line,

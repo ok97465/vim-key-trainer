@@ -262,7 +262,6 @@ def test_code_source_dialog_shows_full_license_without_changing_attempt(
     details = "\n".join(widget.text() for widget in dialog.findChildren(QLabel))
     assert excerpt.source.url in details
     assert excerpt.source.revision in details
-    assert excerpt.source.sha256 in details
     assert f"{excerpt.start_line}~{excerpt.end_line}행" in details
     license_view = dialog.findChild(QTextBrowser)
     assert license_view is not None
@@ -277,17 +276,16 @@ def test_code_source_dialog_shows_full_license_without_changing_attempt(
 @pytest.mark.parametrize(
     "error",
     [
-        ValueError("라이선스 SHA-256 불일치"),
         FileNotFoundError("라이선스 파일이 없습니다."),
         PermissionError("라이선스 파일을 읽을 수 없습니다."),
     ],
-    ids=["hash", "missing", "unreadable"],
+    ids=["missing", "unreadable"],
 )
 def test_code_license_read_failure_preserves_problem(
     code_window: MainWindow,
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
-    error: ValueError | OSError,
+    error: OSError,
 ) -> None:
     code_window.prepare_editing("code_python")
     page = code_window.edit_practice

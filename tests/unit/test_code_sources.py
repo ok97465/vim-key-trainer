@@ -1,7 +1,6 @@
-"""코드 원문의 검증·라이선스·프로젝트 선택과 연속 발췌를 검증한다."""
+"""코드 원문 읽기·라이선스 열람·프로젝트 선택과 연속 발췌를 검증한다."""
 
 # Standard library imports
-import hashlib
 import json
 import shutil
 from dataclasses import replace
@@ -27,11 +26,11 @@ RESOURCE_ROOT = (
 
 @pytest.fixture
 def corpus(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
-    manifest = json.loads((RESOURCE_ROOT / "manifest.json").read_text())
+    manifest = json.loads((RESOURCE_ROOT / "manifest.json").read_text(encoding="utf-8"))
     manifest["sources"] = manifest["sources"][:1]
     entry = manifest["sources"][0]
     shutil.copytree(RESOURCE_ROOT / entry["id"], tmp_path / entry["id"])
-    (tmp_path / "manifest.json").write_text(json.dumps(manifest))
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     return tmp_path, manifest
 
 
@@ -52,12 +51,11 @@ def test_unaltered_corpus_loads_and_full_license_is_available(
     [
         ("source_path", "../source.txt"),
         ("license_path", r"project/..\outside.txt"),
-        ("raw_url", "https://example.com/source.py"),
-        ("revision", "main"),
-        ("license_id", "unknown"),
-        ("transformation", "execute_python"),
-        ("retrieved_on", "2026-99-99"),
         ("excerpt_end", 99999),
+        ("excerpt_end", 499),
+        ("excerpt_start", 0),
+        ("excerpt_start", 99999),
+        ("revision", 123),
         ("language", "json"),
     ],
 )
@@ -66,41 +64,77 @@ def test_invalid_source_metadata_is_rejected(
 ) -> None:
     root, manifest = corpus
     manifest["sources"][0][field] = value
-    (root / "manifest.json").write_text(json.dumps(manifest))
+    (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(ValueError):
         load_code_sources(root)
 
 
-@pytest.mark.parametrize("field", ["source_path", "license_path"])
-def test_modified_bundled_bytes_fail_before_becoming_practice_content(
-    corpus: tuple[Path, dict[str, Any]], field: str
+def test_crlf_source_and_unrestricted_attribution_do_not_block_practice(
+    corpus: tuple[Path, dict[str, Any]],
 ) -> None:
     root, manifest = corpus
     entry = manifest["sources"][0]
-    (root / entry[field]).write_text("tampered")
-    with pytest.raises(ValueError, match="SHA-256"):
-        load_code_sources(root)
+    expected = load_code_sources(root)[0].lines
+    source_file = root / entry["source_path"]
+    raw = source_file.read_text(encoding="utf-8")
+    source_file.write_bytes(raw.replace("\n", "\r\n").encode("utf-8"))
+    (root / entry["license_path"]).unlink()
+    entry.update(
+        project="A local project",
+        title="locally edited source",
+        url="https://example.org/source",
+        raw_url="https://example.org/raw",
+        revision="main",
+        license_id="Project-specific license",
+        license_url="https://example.org/license",
+        license_raw_url="https://example.org/raw-license",
+        transformation="Displayed as ASCII",
+        retrieved_on="not recorded",
+    )
+    (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert load_code_sources(root)[0].lines == expected
+    source_file.write_text(raw.replace("Flask", "Local"), encoding="utf-8")
+    assert (
+        load_code_sources(root)[0].lines
+        == normalize_code_lines(source_file.read_text(encoding="utf-8"))[
+            entry["excerpt_start"] - 1 : entry["excerpt_end"]
+        ]
+    )
+
+
+def test_license_is_read_only_when_requested_without_loading_code(
+    corpus: tuple[Path, dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, manifest = corpus
+    entry = manifest["sources"][0]
+    (root / entry["source_path"]).unlink()
+    (root / entry["license_path"]).write_bytes(b"Local license text.\r\n")
+    monkeypatch.setattr(
+        "vim_key_trainer.content.code_corpus._resource_root", lambda: root
+    )
+    assert read_code_license(entry["id"]) == "Local license text.\n"
 
 
 def test_duplicate_source_id_is_rejected(corpus: tuple[Path, dict[str, Any]]) -> None:
     root, manifest = corpus
     manifest["sources"] *= 2
-    (root / "manifest.json").write_text(json.dumps(manifest))
+    (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(ValueError, match="중복 코드 원문 ID"):
         load_code_sources(root)
 
 
-def test_declared_license_must_match_bundled_license_text(
+def test_same_upstream_attribution_can_identify_distinct_practice_sources(
     corpus: tuple[Path, dict[str, Any]],
 ) -> None:
     root, manifest = corpus
-    entry = manifest["sources"][0]
-    data = b"Not a permission grant."
-    (root / entry["license_path"]).write_bytes(data)
-    entry["license_sha256"] = hashlib.sha256(data).hexdigest()
-    (root / "manifest.json").write_text(json.dumps(manifest))
-    with pytest.raises(ValueError, match="허용 라이선스"):
-        load_code_sources(root)
+    original = manifest["sources"][0]
+    repeated = dict(original, id=original["id"] + "_copy")
+    for field in ("source_path", "license_path"):
+        repeated[field] = repeated["id"] + "/" + Path(original[field]).name
+    shutil.copytree(root / original["id"], root / repeated["id"])
+    manifest["sources"].append(repeated)
+    (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert len(load_code_sources(root)) == 2
 
 
 def test_normalization_preserves_physical_lines_blanks_and_trailing_spaces() -> None:
@@ -113,15 +147,28 @@ def test_normalization_preserves_physical_lines_blanks_and_trailing_spaces() -> 
         normalize_code_lines("safe\nunsafe\x00")
 
 
-@pytest.mark.parametrize("version", [True, 1.0, "1", 2])
-def test_manifest_version_requires_supported_integer(
-    corpus: tuple[Path, dict[str, Any]], version: object
+@pytest.mark.parametrize("data", [[], {}, {"sources": []}, {"sources": {}}])
+def test_code_manifest_requires_source_records(
+    corpus: tuple[Path, dict[str, Any]], data: object
+) -> None:
+    root, _ = corpus
+    (root / "manifest.json").write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError):
+        load_code_sources(root)
+
+
+def test_code_source_can_use_a_shared_nested_package_path(
+    corpus: tuple[Path, dict[str, Any]],
 ) -> None:
     root, manifest = corpus
-    manifest["schema_version"] = version
-    (root / "manifest.json").write_text(json.dumps(manifest))
-    with pytest.raises(ValueError, match="schema_version"):
-        load_code_sources(root)
+    entry = manifest["sources"][0]
+    original = root / entry["source_path"]
+    entry["source_path"] = "shared/archive/source.txt"
+    entry["license_path"] = "LICENSE.txt"
+    (root / entry["source_path"]).parent.mkdir(parents=True)
+    original.rename(root / entry["source_path"])
+    (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert len(load_code_sources(root)[0].lines) >= 500
 
 
 @pytest.mark.parametrize("language", ["python", "cpp"])

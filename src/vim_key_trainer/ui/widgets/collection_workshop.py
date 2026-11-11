@@ -26,10 +26,7 @@ class _WorkshopArt(QWidget):
         self.setMinimumSize(180, 128)
         self.setMaximumWidth(270)
         self.progress = 0
-        try:
-            self.pixmap = QPixmap(game_resource_path("library-workshop.png"))
-        except (OSError, ValueError):
-            self.pixmap = QPixmap()
+        self.pixmap = QPixmap(game_resource_path("library-workshop.png"))
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
     def paintEvent(self, event: QPaintEvent) -> None:

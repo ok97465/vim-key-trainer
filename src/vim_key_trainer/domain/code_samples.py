@@ -10,7 +10,7 @@ from vim_key_trainer.domain.document_missions import MissionSource
 
 @dataclass(frozen=True, slots=True)
 class CodeSource:
-    """검증된 출처와 ASCII 변환 원문. 코드를 실행하거나 파일을 수정하지 않는다."""
+    """출처 정보와 ASCII 변환 원문. 코드를 실행하거나 파일을 수정하지 않는다."""
 
     source: MissionSource
     lines: tuple[str, ...]
@@ -40,7 +40,7 @@ def choose_code_excerpt(
         if source.source.language == language and len(source.lines) >= count:
             projects.setdefault(source.source.project, []).append(source)
     if not projects:
-        raise ValueError("요청한 길이의 검증된 코드 원문이 없습니다.")
+        raise ValueError("요청한 길이의 코드 원문이 없습니다.")
     project = rng.choice(sorted(projects))
     source = rng.choice(sorted(projects[project], key=lambda item: item.source.id))
     start = rng.randrange(len(source.lines) - count + 1)

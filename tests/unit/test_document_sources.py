@@ -1,10 +1,8 @@
-"""다운로드 원문·라이선스·고정된 여러 수정 지점과 실제 키 재생을 검증한다."""
+"""번들 문서의 구조·표기용 출처·수정 지점과 실제 키 재생을 검증한다."""
 
 # Standard library imports
 import copy
-import hashlib
 import json
-import re
 import shutil
 from importlib.resources import files
 from itertools import pairwise
@@ -17,7 +15,6 @@ import pytest
 from vim_key_trainer.content.document_missions import (
     create_document_lesson,
     document_catalog_issues,
-    extract_source_lines,
     get_document_mission,
     list_document_collections,
     list_document_missions,
@@ -66,32 +63,58 @@ def test_bundled_corpus_has_many_real_projects_and_themed_missions() -> None:
 
 
 @pytest.mark.parametrize("mission_id", MISSION_IDS)
-def test_pinned_source_and_license_hashes_match_the_actual_bundled_text(
+def test_bundled_source_attribution_and_full_license_are_available(
     mission_id: str,
 ) -> None:
-    mission = get_document_mission(mission_id)
-    source = mission.source
-    assert re.fullmatch(r"[a-f0-9]{40}", source.revision)
-    assert source.revision in source.url and source.revision in source.raw_url
-    assert source.revision in source.license_url
-    assert source.revision[:12] in source.id
-    raw = ROOT.joinpath(*source.source_path.split("/")).read_bytes()
-    license_data = ROOT.joinpath(*source.license_path.split("/")).read_bytes()
-    assert hashlib.sha256(raw).hexdigest() == source.sha256
-    assert hashlib.sha256(license_data).hexdigest() == source.license_sha256
-    assert read_document_license(source.id) == license_data.decode("utf-8")
-    assert "Copyright" in read_document_license(source.id)
-    assert source.license_id in {"MIT", "BSD-3-Clause"}
-    assert (
-        extract_source_lines(
-            raw.decode("utf-8"),
-            source.excerpt_start,
-            source.excerpt_end,
-            source.language,
-        )
-        == mission.goal_lines
+    source = get_document_mission(mission_id).source
+    assert source.project and source.title and source.url and source.revision
+    assert ROOT.joinpath(*source.source_path.split("/")).is_file()
+    assert read_document_license(source.id) == ROOT.joinpath(
+        *source.license_path.split("/")
+    ).read_text(encoding="utf-8")
+
+
+def test_document_practice_uses_authored_goal_without_reading_source_or_license(
+    corpus_copy: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest_path = corpus_copy / "manifest.json"
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    mission = data["missions"][0]
+    source = mission["source"]
+    (corpus_copy / source["source_path"]).unlink()
+    (corpus_copy / source["license_path"]).write_bytes(b"Local license text.\r\n")
+    mission["goal_lines"][0] = "# An authored practice document"
+    source.update(
+        url="https://example.org/current-document",
+        raw_url="https://example.org/raw-document",
+        revision="main",
+        license_id="Project-specific license",
+        license_url="https://example.org/license",
+        license_raw_url="https://example.org/raw-license",
+        retrieved_on="not recorded",
     )
-    assert source.transformation
+    manifest_path.write_text(json.dumps(data), encoding="utf-8")
+    report = load_document_catalog(corpus_copy)
+    assert not report.issues and len(report.missions) == 16
+    assert report.missions[0].goal_lines == tuple(mission["goal_lines"])
+    monkeypatch.setattr(
+        "vim_key_trainer.content.document_missions._bundled_catalog", lambda: report
+    )
+    monkeypatch.setattr(
+        "vim_key_trainer.content.document_missions._resource_root", lambda: corpus_copy
+    )
+    assert read_document_license(source["id"]) == "Local license text.\n"
+    (corpus_copy / source["license_path"]).unlink()
+    assert not load_document_catalog(corpus_copy).issues
+
+
+def test_crlf_bundled_documents_remain_available(corpus_copy: Path) -> None:
+    for path in corpus_copy.rglob("*.txt"):
+        path.write_bytes(
+            path.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+        )
+    report = load_document_catalog(corpus_copy)
+    assert not report.issues and len(report.missions) == 16
 
 
 @pytest.mark.parametrize("mission_id", MISSION_IDS)
@@ -146,15 +169,7 @@ def test_catalog_and_lesson_creation_never_need_network(
 
 @pytest.mark.parametrize(
     "failure",
-    [
-        "source_hash",
-        "license_hash",
-        "goal",
-        "few_repairs",
-        "duplicate_rows",
-        "path",
-        "url",
-    ],
+    ["goal", "few_repairs", "duplicate_rows", "path", "language", "excerpt"],
 )
 def test_bad_mission_is_excluded_with_file_and_field_issue_while_others_remain(
     corpus_copy: Path,
@@ -163,21 +178,18 @@ def test_bad_mission_is_excluded_with_file_and_field_issue_while_others_remain(
     manifest_path = corpus_copy / "manifest.json"
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
     mission = data["missions"][0]
-    if failure == "source_hash":
-        source_file = corpus_copy / mission["source"]["source_path"]
-        source_file.write_text("corrupted", encoding="utf-8")
-    elif failure == "license_hash":
-        mission["source"]["license_sha256"] = "0" * 64
-    elif failure == "goal":
-        mission["goal_lines"][0] = "invented text without a matching source"
+    if failure == "goal":
+        mission["repairs"][0]["correct"] = "not the target text"
     elif failure == "few_repairs":
         mission["repairs"] = mission["repairs"][:1]
     elif failure == "duplicate_rows":
         mission["repairs"][1] = copy.deepcopy(mission["repairs"][0])
     elif failure == "path":
         mission["source"]["source_path"] = "../../outside.txt"
+    elif failure == "language":
+        mission["source"]["language"] = "json"
     else:
-        mission["source"]["url"] = "https://example.org/fake"
+        mission["source"]["excerpt_end"] = mission["source"]["excerpt_start"] - 1
     manifest_path.write_text(json.dumps(data), encoding="utf-8")
     report = load_document_catalog(corpus_copy)
     assert len(report.missions) == 15
@@ -200,32 +212,26 @@ def test_invalid_collection_and_duplicate_ids_are_isolated(corpus_copy: Path) ->
     assert any("중복" in issue for issue in report.issues)
 
 
-@pytest.mark.parametrize("field", ["url", "license_url", "raw_url", "license_raw_url"])
-def test_revision_in_a_filename_does_not_pin_a_branch_url(
-    corpus_copy: Path, field: str
-) -> None:
-    manifest_path = corpus_copy / "manifest.json"
-    data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    mission = data["missions"][0]
-    source = mission["source"]
-    revision = source["revision"]
-    source[field] = source[field].replace(f"/{revision}/", f"/main/{revision}/")
-    manifest_path.write_text(json.dumps(data), encoding="utf-8")
-    report = load_document_catalog(corpus_copy)
-    assert mission["id"] not in {item.id for item in report.missions}
-    assert any(field in issue and "commit" in issue for issue in report.issues)
-
-
 @pytest.mark.parametrize("field", ["source_path", "license_path"])
-@pytest.mark.parametrize("filename", [r"..\..\outside.txt", r"D:\outside.txt"])
-def test_windows_path_syntax_is_rejected_before_reading_corpus_files(
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "",
+        ".",
+        "/outside.txt",
+        "../outside.txt",
+        r"..\..\outside.txt",
+        r"D:\outside.txt",
+    ],
+)
+def test_unsafe_or_empty_package_paths_are_rejected(
     corpus_copy: Path, field: str, filename: str
 ) -> None:
     manifest_path = corpus_copy / "manifest.json"
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
     mission = data["missions"][0]
     source = mission["source"]
-    source[field] = f"{source['id']}/{filename}"
+    source[field] = filename
     manifest_path.write_text(json.dumps(data), encoding="utf-8")
 
     report = load_document_catalog(corpus_copy)
@@ -236,100 +242,49 @@ def test_windows_path_syntax_is_rejected_before_reading_corpus_files(
     assert field in report.issues[0] and "경로" in report.issues[0]
 
 
-def test_unknown_manifest_schema_does_not_attempt_to_read_source_files(
-    corpus_copy: Path,
-) -> None:
-    (corpus_copy / "manifest.json").write_text(
-        '{"schema_version": 2}', encoding="utf-8"
-    )
-    report = load_document_catalog(corpus_copy)
-    assert not report.missions
-    assert "schema_version" in report.issues[0]
-
-
-@pytest.mark.parametrize("schema_version", [True, False, 1.0, "1", None])
-def test_manifest_schema_requires_integer_one(
-    corpus_copy: Path,
-    schema_version: object,
-) -> None:
-    manifest_path = corpus_copy / "manifest.json"
-    data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    data["schema_version"] = schema_version
-    manifest_path.write_text(json.dumps(data), encoding="utf-8")
-    report = load_document_catalog(corpus_copy)
-    assert not report.missions
-    assert "schema_version" in report.issues[0]
-
-
 @pytest.mark.parametrize(
-    "changed_metadata",
-    ["language", "source_path", "sha256", "license_sha256"],
+    "data",
+    [[], {}, {"collections": []}, {"collections": {}, "missions": []}],
 )
-def test_source_id_cannot_identify_conflicting_physical_metadata(
+def test_document_catalog_requires_collection_and_mission_lists(
+    corpus_copy: Path, data: object
+) -> None:
+    (corpus_copy / "manifest.json").write_text(json.dumps(data), encoding="utf-8")
+    report = load_document_catalog(corpus_copy)
+    assert not report.missions
+    assert "collections/missions" in report.issues[0]
+
+
+def test_package_paths_may_use_shared_folders_and_nested_subfolders(
     corpus_copy: Path,
-    changed_metadata: str,
 ) -> None:
     manifest_path = corpus_copy / "manifest.json"
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    repeated = copy.deepcopy(data["missions"][0])
-    repeated["id"] = "mission_flask_duplicate_source"
-    source = repeated["source"]
-    if changed_metadata == "language":
-        # text와 markdown은 동일한 발췌 변환이므로 개별 미션 검증만으로 구별되지 않는다.
-        source["language"] = "text"
-    elif changed_metadata == "source_path":
-        previous = corpus_copy / source["source_path"]
-        source["source_path"] = f"{source['id']}/alternate.txt"
-        (corpus_copy / source["source_path"]).write_bytes(previous.read_bytes())
-    elif changed_metadata == "sha256":
-        previous = corpus_copy / source["source_path"]
-        raw = previous.read_bytes() + b"\n"
-        source["source_path"] = f"{source['id']}/alternate.txt"
-        source["sha256"] = hashlib.sha256(raw).hexdigest()
-        (corpus_copy / source["source_path"]).write_bytes(raw)
-    else:
-        previous = corpus_copy / source["license_path"]
-        raw = previous.read_bytes() + b"\n"
-        source["license_path"] = f"{source['id']}/alternate-license.txt"
-        source["license_sha256"] = hashlib.sha256(raw).hexdigest()
-        (corpus_copy / source["license_path"]).write_bytes(raw)
-    data["missions"].append(repeated)
+    source = data["missions"][0]["source"]
+    source.update(source_path="shared/archive/source.txt", license_path="LICENSE.txt")
     manifest_path.write_text(json.dumps(data), encoding="utf-8")
     report = load_document_catalog(corpus_copy)
-    assert len(report.missions) == 16
-    assert report.missions[0].source == get_document_mission("mission_flask").source
-    assert repeated["id"] not in {mission.id for mission in report.missions}
-    assert len(report.issues) == 1
-    assert "manifest.json" in report.issues[0]
-    assert "missions.16" in report.issues[0] and "source.id" in report.issues[0]
+    assert not report.issues and len(report.missions) == 16
 
 
-@pytest.mark.parametrize("different_excerpt", [False, True])
-def test_same_physical_source_can_supply_multiple_valid_missions(
+def test_multiple_missions_can_share_source_id_with_different_attribution(
     corpus_copy: Path,
-    different_excerpt: bool,
 ) -> None:
     manifest_path = corpus_copy / "manifest.json"
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
     repeated = copy.deepcopy(data["missions"][0])
     repeated["id"] = "mission_flask_second_excerpt"
-    source = repeated["source"]
-    if different_excerpt:
-        source["excerpt_end"] += 1
-        source["transformation"] += " 원문 다음 행까지 포함한 추가 발췌."
-        raw = (corpus_copy / source["source_path"]).read_text(encoding="utf-8")
-        repeated["goal_lines"] = extract_source_lines(
-            raw,
-            source["excerpt_start"],
-            source["excerpt_end"],
-            source["language"],
-        )
+    repeated["source"].update(
+        project="Another project name",
+        revision="edited locally",
+        source_path=f"{repeated['source']['id']}/alternate.txt",
+        language="text",
+    )
+    repeated["goal_lines"][0] = "# Another authored practice document"
     data["missions"].append(repeated)
     manifest_path.write_text(json.dumps(data), encoding="utf-8")
     report = load_document_catalog(corpus_copy)
     assert not report.issues
     assert len(report.missions) == 17
     assert report.missions[-1].source.id == report.missions[0].source.id
-    assert (
-        report.missions[-1].goal_lines != report.missions[0].goal_lines
-    ) is different_excerpt
+    assert report.missions[-1].goal_lines != report.missions[0].goal_lines

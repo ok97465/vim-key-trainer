@@ -63,7 +63,6 @@ def _register_catalog(repository: SqliteResultRepository) -> None:
             url=source.url,
             revision=source.revision,
             license_id=source.license_id,
-            sha256=source.sha256,
             language=mission.language,
         )
         lesson = create_document_lesson(mission.id)

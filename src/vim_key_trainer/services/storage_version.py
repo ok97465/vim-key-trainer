@@ -1,3 +1,3 @@
 """기록 형식·콘텐츠·채점 변경 시 올리는 단일 저장 버전."""
 
-STORAGE_VERSION = 8
+STORAGE_VERSION = 9

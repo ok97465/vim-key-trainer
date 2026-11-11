@@ -331,10 +331,11 @@ def test_failed_new_document_keeps_running_attempt(
         "vim_key_trainer.ui.edit_practice.create_random_document_problem",
         invalid_problem,
     )
-    qtbot.mouseClick(page.new_problem_button, Qt.MouseButton.LeftButton)
+    # OS별 마우스 포커스 이동과 분리해 문제 생성 실패 경로를 검증한다.
+    page.new_problem_button.click()
 
     assert page.session is session
-    assert session.state == SessionState.PAUSED
+    assert session.state == SessionState.RUNNING
     assert session.engine.snapshot() == snapshot
     assert session.key_count == 1
     assert page.document_combo.currentData() == session.lesson.id

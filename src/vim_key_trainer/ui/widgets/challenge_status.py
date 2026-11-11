@@ -45,10 +45,7 @@ class _Mascot(QWidget):
         super().__init__(parent)
         self.setFixedSize(50, 50)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        try:
-            self._pixmap = QPixmap(game_resource_path("bomb-mascot.png"))
-        except (OSError, ValueError):
-            self._pixmap = QPixmap()
+        self._pixmap = QPixmap(game_resource_path("bomb-mascot.png"))
         self.progress = 1.0
         self.verdict = ""
         self.reduced_motion = False
@@ -62,14 +59,11 @@ class _Mascot(QWidget):
 
     def configure_appearance(self, settings: AppearanceSettings) -> None:
         self.appearance = settings
-        try:
-            self._pixmap = QPixmap(
-                game_resource_path(
-                    "cat-mascot.png" if settings.mascot == "cat" else "bomb-mascot.png"
-                )
+        self._pixmap = QPixmap(
+            game_resource_path(
+                "cat-mascot.png" if settings.mascot == "cat" else "bomb-mascot.png"
             )
-        except (OSError, ValueError):
-            self._pixmap = QPixmap()
+        )
         self.setVisible(settings.decorations)
         self.update()
 

@@ -448,7 +448,6 @@ def source_record() -> SourceDocumentRecord:
         url="https://example.test/revision/README.md",
         revision="immutable",
         license_id="MIT",
-        sha256="a" * 64,
         language="markdown",
     )
 
@@ -474,6 +473,7 @@ def test_document_catalog_keeps_only_current_metadata_and_is_idempotent(
     repository.register_document_catalog((source,), (mission,))
     repository.register_document_catalog((source,), (mission,))
     repository.register_document_catalog((), (replace(mission, signature="new_goal"),))
+    repository.register_document_catalog((replace(source, revision="updated"),), ())
     with sqlite3.connect(path) as connection:
         assert (
             connection.execute("SELECT COUNT(*) FROM source_documents").fetchone()[0]
@@ -487,10 +487,8 @@ def test_document_catalog_keeps_only_current_metadata_and_is_idempotent(
             "SELECT signature FROM mission_catalog"
         ).fetchone() == ("new_goal",)
         assert connection.execute(
-            "SELECT license_id,sha256 FROM source_documents"
-        ).fetchone() == ("MIT", "a" * 64)
-    with pytest.raises(ValueError, match="새 ID"):
-        repository.register_document_catalog((replace(source, revision="mutated"),), ())
+            "SELECT license_id,revision FROM source_documents"
+        ).fetchone() == ("MIT", "updated")
     repository.close()
 
 
@@ -510,9 +508,15 @@ def test_catalog_registration_failure_rolls_back_new_source(tmp_path: Path) -> N
     repository.close()
 
 
-def test_mission_with_fewer_than_three_repairs_is_not_registered() -> None:
-    with pytest.raises(ValueError, match="3곳"):
-        replace(mission_record(), repair_count=1)
+def test_database_rejects_mission_with_fewer_than_three_repairs(tmp_path: Path) -> None:
+    repository = SqliteResultRepository(tmp_path / "training.sqlite3")
+    try:
+        with pytest.raises(sqlite3.IntegrityError):
+            repository.register_document_catalog(
+                (source_record(),), (replace(mission_record(), repair_count=1),)
+            )
+    finally:
+        repository.close()
 
 
 def test_application_registers_corpus_and_restores_mission_progress(

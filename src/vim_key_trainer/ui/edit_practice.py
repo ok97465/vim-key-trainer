@@ -375,16 +375,13 @@ class EditPracticePage(QWidget):
         self._load_result_mascot()
 
     def _load_result_mascot(self) -> None:
-        try:
-            source = QPixmap(
-                game_resource_path(
-                    "cat-mascot.png"
-                    if self.appearance.mascot == "cat"
-                    else "bomb-mascot.png"
-                )
+        source = QPixmap(
+            game_resource_path(
+                "cat-mascot.png"
+                if self.appearance.mascot == "cat"
+                else "bomb-mascot.png"
             )
-        except (ValueError, OSError):
-            source = QPixmap()
+        )
         scale = max(2.0, self.devicePixelRatioF())
         mascot = source.scaled(
             QSize(round(112 * scale), round(112 * scale)),
@@ -1359,7 +1356,6 @@ class EditPracticePage(QWidget):
             label(
                 f"{source.project} · {source.title}\n{source.url}\n"
                 f"라이선스 {source.license_id}\n고정 버전 {source.revision}\n"
-                f"원문 SHA-256 {source.sha256}\n"
                 + (
                     f"발췌 {excerpt.start_line}~{excerpt.end_line}행\n"
                     if excerpt is not None

@@ -1,11 +1,10 @@
 """현재 형식의 SQLite 기록·출처·미션 카탈로그와 실패 시 메모리 보존.
 
-원문은 패키지 자원에 보관한다. DB에는 고정 revision/hash의 출처와 미션 메타데이터,
+원문은 패키지 자원에 보관한다. DB에는 출처와 미션 메타데이터,
 시도별 결과 및 비교 기록만 둔다. 시도 INSERT와 별/최고 기록 반영은 한 트랜잭션이다.
 """
 
 # Standard library imports
-import re
 import sqlite3
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -38,18 +37,7 @@ class SourceDocumentRecord:
     url: str
     revision: str
     license_id: str
-    sha256: str
     language: str
-
-    def __post_init__(self) -> None:
-        if (
-            not all((self.id, self.project, self.title, self.revision, self.license_id))
-            or not self.url.startswith("https://")
-            or re.fullmatch(r"[0-9a-f]{64}", self.sha256) is None
-        ):
-            raise ValueError(
-                "문서 출처의 ID·주소·버전·라이선스·해시가 올바르지 않습니다."
-            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,28 +49,12 @@ class MissionRecord:
     repair_count: int
     signature: str
 
-    def __post_init__(self) -> None:
-        if (
-            not all(
-                (
-                    self.id,
-                    self.source_id,
-                    self.collection_id,
-                    self.title,
-                    self.signature,
-                )
-            )
-            or self.repair_count < 3
-        ):
-            raise ValueError("미션은 출처와 3곳 이상의 수정 구간이 필요합니다.")
-
 
 _SCHEMA = (
     """CREATE TABLE source_documents (
         id TEXT PRIMARY KEY, project TEXT NOT NULL, title TEXT NOT NULL,
         url TEXT NOT NULL, revision TEXT NOT NULL, license_id TEXT NOT NULL,
-        sha256 TEXT NOT NULL, language TEXT NOT NULL,
-        UNIQUE(url, revision, sha256)
+        language TEXT NOT NULL
     )""",
     """CREATE TABLE mission_catalog (
         id TEXT PRIMARY KEY,
@@ -255,46 +227,59 @@ class SqliteResultRepository(MemoryResultRepository):
                     result.stars,
                 ),
             )
-            previous = self._connection.execute(
-                """SELECT comparison_bests.attempt_id, attempts.state,
-                          attempts.comparison_key, attempts.result_json
-                FROM comparison_bests
-                LEFT JOIN attempts USING(attempt_id)
-                WHERE comparison_bests.comparison_key=?""",
-                (digest,),
-            ).fetchone()
-            best: StoredResult | None = result
-            if previous is None or (
-                previous[0] in self._quarantined_attempts
-                or previous[1] != SessionState.COMPLETED.value
-                or previous[2] != digest
-                or not record_eligible(decode_result(previous[3]))
+            self._update_comparison_best(result, digest)
+
+    def _update_comparison_best(self, result: StoredResult, digest: str) -> None:
+        previous = self._read_comparison_best(digest)
+        if previous is None:
+            # 누락·손상된 참조를 복구할 때 기존의 더 좋은 기록을 보존한다.
+            best = self._find_comparison_best(digest)
+        elif is_better_result(result, previous):
+            best = result
+        else:
+            return
+        self._connection.execute(
+            """INSERT INTO comparison_bests VALUES (?, ?)
+            ON CONFLICT(comparison_key) DO UPDATE SET
+                attempt_id=excluded.attempt_id""",
+            (digest, best.attempt_id),
+        )
+
+    def _read_comparison_best(self, digest: str) -> StoredResult | None:
+        previous = self._connection.execute(
+            """SELECT comparison_bests.attempt_id, attempts.state,
+                      attempts.comparison_key, attempts.result_json
+            FROM comparison_bests
+            LEFT JOIN attempts USING(attempt_id)
+            WHERE comparison_bests.comparison_key=?""",
+            (digest,),
+        ).fetchone()
+        if (
+            previous is None
+            or previous[0] in self._quarantined_attempts
+            or previous[1] != SessionState.COMPLETED.value
+            or previous[2] != digest
+        ):
+            return None
+        result = decode_result(previous[3])
+        return result if record_eligible(result) else None
+
+    def _find_comparison_best(self, digest: str) -> StoredResult:
+        best: StoredResult | None = None
+        for attempt_id, payload in self._connection.execute(
+            """SELECT attempt_id, result_json FROM attempts
+            WHERE comparison_key=? AND state='completed' ORDER BY rowid""",
+            (digest,),
+        ):
+            if attempt_id in self._quarantined_attempts:
+                continue
+            candidate = decode_result(payload)
+            if record_eligible(candidate) and (
+                best is None or is_better_result(candidate, best)
             ):
-                # 누락·손상된 참조를 복구할 때 기존의 더 좋은 기록을 보존한다.
-                best = None
-                for attempt_id, stored_payload in self._connection.execute(
-                    """SELECT attempt_id, result_json FROM attempts
-                    WHERE comparison_key=? AND state='completed' ORDER BY rowid""",
-                    (digest,),
-                ):
-                    if attempt_id in self._quarantined_attempts:
-                        continue
-                    candidate = decode_result(stored_payload)
-                    if record_eligible(candidate) and (
-                        best is None or is_better_result(candidate, best)
-                    ):
-                        best = candidate
-            elif previous is not None and not is_better_result(
-                result, decode_result(previous[3])
-            ):
-                return
-            assert best is not None  # 현재 시도도 같은 트랜잭션에 삽입되어 있다.
-            self._connection.execute(
-                """INSERT INTO comparison_bests VALUES (?, ?)
-                ON CONFLICT(comparison_key) DO UPDATE SET
-                    attempt_id=excluded.attempt_id""",
-                (digest, best.attempt_id),
-            )
+                best = candidate
+        assert best is not None  # 현재 시도도 같은 트랜잭션에 삽입되어 있다.
+        return best
 
     def retry_pending(self) -> int:
         return sum(
@@ -313,20 +298,14 @@ class SqliteResultRepository(MemoryResultRepository):
                     source.url,
                     source.revision,
                     source.license_id,
-                    source.sha256,
                     source.language,
                 )
-                previous = self._connection.execute(
-                    "SELECT * FROM source_documents WHERE id=?",
-                    (source.id,),
-                ).fetchone()
-                if previous is not None and previous != values:
-                    raise ValueError(
-                        "고정 출처 ID의 메타데이터가 바뀌었습니다. 새 ID가 필요합니다."
-                    )
                 self._connection.execute(
-                    """INSERT INTO source_documents VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(id) DO NOTHING""",
+                    """INSERT INTO source_documents VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        project=excluded.project, title=excluded.title,
+                        url=excluded.url, revision=excluded.revision,
+                        license_id=excluded.license_id, language=excluded.language""",
                     values,
                 )
             for mission in missions:

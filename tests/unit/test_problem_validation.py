@@ -1,4 +1,4 @@
-"""생성 서비스가 재현 조건·출처·손상·기준 풀이를 독립적으로 검증하는지 확인한다."""
+"""생성 서비스의 재현 조건·손상·기준 풀이와 실제 완료를 검증한다."""
 
 # Standard library imports
 from dataclasses import replace
@@ -7,14 +7,10 @@ from dataclasses import replace
 import pytest
 
 # Local imports
-from vim_key_trainer.content.code_corpus import load_code_sources
 from vim_key_trainer.content.document_missions import list_document_missions
 from vim_key_trainer.content.edit_loader import EditContentError
 from vim_key_trainer.domain.document_missions import DocumentPracticeSpec
-from vim_key_trainer.domain.edit_generator import (
-    CODE_SOURCE_SELECTION_VERSION,
-    list_edit_profiles,
-)
+from vim_key_trainer.domain.edit_generator import list_edit_profiles
 from vim_key_trainer.domain.editing import EditMode, EditPracticeSpec
 from vim_key_trainer.domain.keys import KeyToken
 from vim_key_trainer.domain.sessions import InputResult, SessionState
@@ -112,54 +108,6 @@ def test_local_document_problem_does_not_require_code_corpus(
         create_edit_problem(EditPracticeSpec(profile_id, 78, line_count)).code_excerpt
         is None
     )
-
-
-@pytest.mark.parametrize("field", ["source", "range", "lines"])
-def test_factory_rejects_code_whose_provenance_disagrees_with_goal(
-    field: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    spec = EditPracticeSpec("code_python", seed=78, document_lines=300)
-    valid = create_edit_problem(spec)
-    excerpt = valid.code_excerpt
-    assert excerpt is not None
-    if field == "source":
-        excerpt = replace(excerpt, source=replace(excerpt.source, sha256="0" * 64))
-    elif field == "range":
-        excerpt = replace(excerpt, start_line=excerpt.start_line + 1)
-    else:
-        excerpt = replace(excerpt, lines=("changed",) + excerpt.lines[1:])
-    monkeypatch.setattr(
-        edit_problem_factory,
-        "generate_edit_lesson",
-        lambda _spec, **_kwargs: replace(valid, code_excerpt=excerpt),
-    )
-    with pytest.raises(ValueError, match="출처"):
-        create_edit_problem(spec)
-
-
-def test_factory_rejects_another_registered_source_for_fixed_selection(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    random_spec = EditPracticeSpec("code_python", seed=78, document_lines=300)
-    random_lesson = create_edit_problem(random_spec)
-    assert random_lesson.code_excerpt is not None
-    other_source = next(
-        entry.source.id
-        for entry in load_code_sources()
-        if entry.source.language == "python"
-        and entry.source.id != random_lesson.code_excerpt.source.id
-    )
-    fixed_spec = replace(random_spec, code_source_id=other_source)
-    wrong = replace(
-        random_lesson,
-        practice_spec=fixed_spec,
-        generator_version=CODE_SOURCE_SELECTION_VERSION,
-    )
-    monkeypatch.setattr(
-        edit_problem_factory, "generate_edit_lesson", lambda _spec, **_kwargs: wrong
-    )
-    with pytest.raises(ValueError, match="출처"):
-        create_edit_problem(fixed_spec)
 
 
 def test_factory_verifies_original_damage_and_exact_repair() -> None:
