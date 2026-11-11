@@ -10,7 +10,16 @@ _ALLOWED_ASSETS = frozenset(
         "library-workshop.png",
         "success.wav",
         "timeout.wav",
+        "expired.wav",
         "countdown.wav",
+        "finale.wav",
+        *(f"pressure-{level}.wav" for level in range(3)),
+        *(
+            f"success-{style}-{level}-{variation}.wav"
+            for style in ("precise", "heavy", "soft")
+            for level in range(4)
+            for variation in range(4)
+        ),
     }
 )
 

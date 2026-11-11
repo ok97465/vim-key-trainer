@@ -1,8 +1,9 @@
 """개인 기록 비교의 수동 상태 표시. 입력·시간·문서를 변경하지 않는다."""
 
 # Third party imports
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QHBoxLayout, QProgressBar, QSizePolicy, QWidget
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QPainter, QPaintEvent, QPen
+from PySide6.QtWidgets import QHBoxLayout, QSizePolicy, QWidget
 
 # Local imports
 from vim_key_trainer.services.challenge_rival import (
@@ -13,6 +14,62 @@ from vim_key_trainer.services.challenge_rival import (
 from vim_key_trainer.services.edit_session import EditingSession
 from vim_key_trainer.services.result_repository import ResultRepository
 from vim_key_trainer.ui.components import label
+
+
+class _RaceTrack(QWidget):
+    """내 정산 진도와 같은 활성 시간의 최고 기록 진도를 나란히 그린다."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.progress: RivalProgress | None = None
+        self.setMinimumWidth(140)
+        self.setMaximumWidth(260)
+        self.setFixedHeight(34)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setAccessibleName("내 해체 진도와 최고 기록의 두 주자 트랙")
+
+    def sizeHint(self) -> QSize:
+        return QSize(210, 34)
+
+    def set_progress(self, progress: RivalProgress | None) -> None:
+        self.progress = progress
+        self.update()
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        progress = self.progress
+        own = (
+            progress.completed_segments / max(1, progress.total_segments)
+            if progress is not None
+            else 0.0
+        )
+        reference = progress.reference_progress if progress is not None else 0.0
+        if progress is None or not progress.eligible:
+            painter.setOpacity(0.38)
+        start, finish = 54.0, self.width() - 9.0
+        for y, caption, ratio, color in (
+            (9.0, "내 해체", own, "#91e6bc"),
+            (26.0, "최고 기록", reference, "#b9a4ee"),
+        ):
+            painter.setPen(QColor(color))
+            font = painter.font()
+            font.setPointSizeF(8)
+            painter.setFont(font)
+            painter.drawText(
+                QRectF(0, y - 8, 50, 16), Qt.AlignmentFlag.AlignVCenter, caption
+            )
+            painter.setPen(QPen(QColor("#3b4b53"), 2))
+            painter.drawLine(QPointF(start, y), QPointF(finish, y))
+            painter.setPen(QPen(QColor(color), 2.5))
+            x = start + (finish - start) * min(1.0, max(0.0, ratio))
+            painter.drawLine(QPointF(start, y), QPointF(x, y))
+            painter.setBrush(QColor(color))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(QPointF(x, y), 4, 4)
+            painter.setPen(QPen(QColor("#e2e9e0"), 1))
+            painter.drawLine(QPointF(finish, y - 5), QPointF(finish, y + 5))
 
 
 class ChallengeRivalStatus(QWidget):
@@ -32,17 +89,8 @@ class ChallengeRivalStatus(QWidget):
         self.message = label("개인 기록 대결 꺼짐", "muted")
         self.message.setMinimumWidth(190)
         row.addWidget(self.message, 1)
-        self.reference_progress = QProgressBar()
-        self.reference_progress.setRange(0, 1000)
-        self.reference_progress.setValue(0)
-        self.reference_progress.setTextVisible(False)
-        self.reference_progress.setFixedSize(72, 5)
-        self.reference_progress.setAccessibleName("개인 기록의 구간 진행")
-        self.reference_progress.setStyleSheet(
-            "QProgressBar { background: #2b3a44; border: 0; border-radius: 2px; }"
-            " QProgressBar::chunk { background: #a79bd4; border-radius: 2px; }"
-        )
-        row.addWidget(self.reference_progress)
+        self.race_track = _RaceTrack()
+        row.addWidget(self.race_track, 1)
 
     def set_session(
         self,
@@ -86,15 +134,14 @@ class ChallengeRivalStatus(QWidget):
             text = f"개인 기록보다 {abs(progress.delta_seconds):.1f}초 {pace}"
         self.message.setText(text)
         self.setAccessibleName(text)
-        self.reference_progress.setValue(
-            round(progress.reference_progress * 1000) if progress else 0
-        )
+        self.race_track.set_progress(progress)
         self.setToolTip(
             (
                 f"정산 구간 {progress.completed_segments}/{progress.total_segments} · "
                 f"이번 누적 {progress.checkpoint_seconds:.1f}초 · "
                 f"개인 기록 누적 {progress.reference_checkpoint_seconds:.1f}초. "
-                "보라색 막대는 같은 활성 시간에서 개인 기록의 진행입니다."
+                "민트 주자는 직접 정산한 구간 진도, 보라색 주자는 같은 활성 "
+                "시간에서 최고 기록의 구간별 요약 진도입니다."
             )
             if progress
             else "문제·난이도·자동 수정·힌트·단계 복귀·일시정지 조건이 같은 "

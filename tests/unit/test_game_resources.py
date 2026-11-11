@@ -12,13 +12,22 @@ from vim_key_trainer.ui.game_resources import game_resource_path
 
 
 def test_packaged_images_and_audio_are_available() -> None:
-    for name in ("success", "timeout", "countdown"):
+    for name, minimum, maximum in (
+        ("success", 0.7, 1.0),
+        ("success-heavy-3-2", 0.7, 1.0),
+        ("success-soft-1-3", 0.7, 1.0),
+        ("timeout", 0.5, 0.8),
+        ("expired", 0.8, 1.1),
+        ("countdown", 0.05, 0.2),
+        ("pressure-2", 0.2, 0.4),
+        ("finale", 1.3, 1.8),
+    ):
         path = game_resource_path(name + ".wav")
         with wave.open(path, "rb") as stream:
             assert stream.getnchannels() == 1
             assert stream.getsampwidth() == 2
             assert stream.getframerate() == 44_100
-            assert 0 < stream.getnframes() / stream.getframerate() < 0.5
+            assert minimum < stream.getnframes() / stream.getframerate() < maximum
     for name in ("bomb-mascot.png", "cat-mascot.png", "library-workshop.png"):
         assert (
             Path(game_resource_path(name)).read_bytes().startswith(b"\x89PNG\r\n\x1a\n")

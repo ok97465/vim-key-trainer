@@ -146,6 +146,7 @@ class MainWindow(QMainWindow):
         self.commands_menu_page = self._make_commands_menu()
         self.editing_menu_page = EditCategoryPage()
         self.editing_menu_page.configure_appearance(self._app_settings.appearance)
+        self.editing_menu_page.configure_effects(self._app_settings.presentation)
         self.editing_menu_page.refresh(self.repository)
         self.editing_menu_page.general_requested.connect(self.show_general_editing)
         self.editing_menu_page.techniques_requested.connect(self.show_technique_editing)
@@ -161,6 +162,7 @@ class MainWindow(QMainWindow):
             self.repository,
             technique_weights=self._edit_weights,
             challenge=self._app_settings.challenge,
+            default_mode=self._app_settings.edit_mode,
             presentation=self._app_settings.presentation,
             record_rival=self._app_settings.record_rival,
             appearance=self.editing_menu_page.appearance_settings,
@@ -678,7 +680,8 @@ class MainWindow(QMainWindow):
         box.addWidget(label("폭탄 도전의 소리와 화면 효과", "sectionTitle"))
         box.addWidget(
             label(
-                "귀여운 해체 도우미와 짧은 반짝임으로 결과를 확인합니다. "
+                "절단·낙하·잔상과 해체음을 함께 즐길 수 있습니다. "
+                "심지 불꽃과 위험 테두리는 남은 시간에 반응합니다. "
                 "도전 종류·제한시간·자동 수정은 문서 수정 준비 화면에서 고릅니다.",
                 "muted",
                 wrap=True,
@@ -693,7 +696,7 @@ class MainWindow(QMainWindow):
         self.success_sound_check.setChecked(settings.success_sound)
         self.failure_sound_check = QCheckBox("실패음")
         self.failure_sound_check.setChecked(settings.failure_sound)
-        self.countdown_sound_check = QCheckBox("마지막 초읽기음")
+        self.countdown_sound_check = QCheckBox("초읽기·심지·박동음")
         self.countdown_sound_check.setChecked(settings.countdown_sound)
         choices = QGridLayout()
         for index, widget in enumerate(
@@ -740,10 +743,12 @@ class MainWindow(QMainWindow):
         )
         self.volume_value.setText(f"{self.volume_slider.value()}%")
         self.edit_practice.configure_effects(settings)
+        self.editing_menu_page.configure_effects(settings)
         self._save_settings()
 
     def _save_settings(self) -> None:
         self._app_settings = AppSettings(
+            edit_mode=self.edit_practice.default_mode,
             challenge=self.edit_practice.default_challenge,
             presentation=self.edit_practice.presentation,
             font_size=self.edit_practice.document_font_spin.value(),
@@ -1355,6 +1360,8 @@ class MainWindow(QMainWindow):
                         self.command_page.pause()
                 elif self.stack.currentWidget() == self.edit_practice:
                     self.edit_practice.pause()
+                elif self.stack.currentWidget() == self.editing_menu_page:
+                    self.editing_menu_page.stop_effects()
         super().changeEvent(event)
 
     def _finish(self) -> None:

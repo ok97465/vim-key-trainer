@@ -147,6 +147,9 @@ def test_no_repair_timeout_remains_manual_and_pause_excludes_wait(qtbot: QtBot) 
     assert session.elapsed_seconds == elapsed
     assert page.practice_input.hasFocus()
     assert "직접 마무리" in page.challenge_status.countdown.text()
+    assert page.challenge_status.fuse.ratio == 0
+    assert not page.challenge_status.fuse.spark
+    assert not page.challenge_status.motion_timer.isActive()
     expected = session.expected_token
     assert expected is not None
     press_edit_key(window, qtbot, expected)

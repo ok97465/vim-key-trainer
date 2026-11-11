@@ -10,8 +10,13 @@ import pytest
 
 # Local imports
 from vim_key_trainer.domain.challenge import ChallengeOptions
+from vim_key_trainer.domain.editing import EditMode
 from vim_key_trainer.domain.preferences import PresentationSettings
-from vim_key_trainer.services.settings_repository import AppSettings, SettingsRepository
+from vim_key_trainer.services.settings_repository import (
+    SETTINGS_VERSION,
+    AppSettings,
+    SettingsRepository,
+)
 
 
 def test_settings_roundtrip_and_failed_replace_preserves_previous(
@@ -40,6 +45,23 @@ def test_settings_roundtrip_and_failed_replace_preserves_previous(
     assert sorted(item.name for item in path.parent.iterdir()) == ["settings.json"]
 
 
+@pytest.mark.parametrize("mode", ["guided", "free"])
+def test_last_edit_choices_survive_settings_roundtrip(
+    tmp_path: Path, mode: EditMode
+) -> None:
+    path = tmp_path / "settings.json"
+    repository = SettingsRepository(path)
+    settings = AppSettings(
+        challenge=ChallengeOptions("bomb", "relaxed", False),
+        edit_mode=mode,
+    )
+    assert repository.save(settings)
+    restored = SettingsRepository(path).load()
+    assert restored.edit_mode == mode
+    assert restored.challenge == settings.challenge
+    assert json.loads(path.read_text(encoding="utf-8"))["version"] == SETTINGS_VERSION
+
+
 @pytest.mark.parametrize(
     "mutation",
     [
@@ -50,6 +72,9 @@ def test_settings_roundtrip_and_failed_replace_preserves_previous(
         {"extra": "unknown"},
         {"challenge": {"kind": "bomb", "difficulty": "normal", "auto_repair": 1}},
         {"presentation": {"volume": float("nan")}},
+        {"edit_mode": "visual"},
+        {"edit_mode": True},
+        {"edit_mode": ["guided"]},
     ],
 )
 def test_invalid_settings_reset_all_fields(
@@ -63,6 +88,24 @@ def test_invalid_settings_reset_all_fields(
     path.write_text(json.dumps(data), encoding="utf-8")
     assert repository.load() == AppSettings()
     assert repository.last_error
+
+
+def test_old_settings_version_resets_choices_without_rewriting_the_file(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "settings.json"
+    repository = SettingsRepository(path)
+    assert repository.save(
+        AppSettings(challenge=ChallengeOptions("bomb", "challenge"), edit_mode="free")
+    )
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["version"] = 1
+    del data["edit_mode"]
+    path.write_text(json.dumps(data), encoding="utf-8")
+    before = path.read_bytes()
+    assert repository.load() == AppSettings()
+    assert repository.last_error
+    assert path.read_bytes() == before
 
 
 @pytest.mark.parametrize("raw", [b"\xff", b"{", b" " * 16_385, b"[1,2]"])

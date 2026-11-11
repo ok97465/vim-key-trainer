@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "version": 1,
+  "version": 3,
   "license": "MIT",
   "license_file": "LICENSE.txt",
   "assets": [
@@ -13,17 +13,17 @@
     {
       "file": "success.wav",
       "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
-      "version": 1
+      "version": 2
     },
     {
       "file": "timeout.wav",
       "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
-      "version": 1
+      "version": 2
     },
     {
       "file": "countdown.wav",
       "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
-      "version": 1
+      "version": 2
     },
     {
       "file": "library-workshop.png",
@@ -36,6 +36,271 @@
       "source": "OpenAI built-in image_gen",
       "version": 1,
       "prompt": "Use case: stylized-concept. Asset type: premium transparent mascot game sprite, one selectable cute bomb appearance for an educational desktop typing game. Primary request: one irresistibly cute mint cat-shaped round toy bomb, high quality soft clay 3D rendering. Single squishy pale mint spherical cat body with tiny rounded triangular cat ears, glossy black oval eyes, rosy peach cheeks, very small smiling cat mouth, little navy mitten paws and little rounded feet. Short curved braided cream fuse emerging between the ears, with tiny glowing golden star tip, friendly and calm, not scary. Front three-quarter view, full body centered, clean silhouette with ample transparent padding, isolated on genuinely transparent background. Tactile soft felt-clay surface, expertly sculpted smooth shapes, subtle studio shading and soft highlights, beautifully crisp detail at high resolution and readable at 48 pixels. No text, no watermark, no ground plane, no extra objects, no backgrounds, no checkerboard, no multiple characters, no panels."
+    },
+    {
+      "file": "finale.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "pressure-0.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "pressure-1.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "pressure-2.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-heavy-0-0.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-heavy-0-1.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-heavy-0-2.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-heavy-0-3.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-heavy-1-0.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-heavy-1-1.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-heavy-1-2.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-heavy-1-3.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-heavy-2-0.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-heavy-2-1.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-heavy-2-2.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-heavy-2-3.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-heavy-3-0.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-heavy-3-1.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-heavy-3-2.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-heavy-3-3.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-precise-0-0.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-precise-0-1.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-precise-0-2.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-precise-0-3.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-precise-1-0.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-precise-1-1.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-precise-1-2.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-precise-1-3.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-precise-2-0.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-precise-2-1.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-precise-2-2.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-precise-2-3.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-precise-3-0.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-precise-3-1.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-precise-3-2.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-precise-3-3.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-soft-0-0.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-soft-0-1.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-soft-0-2.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-soft-0-3.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-soft-1-0.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-soft-1-1.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-soft-1-2.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-soft-1-3.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-soft-2-0.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-soft-2-1.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-soft-2-2.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-soft-2-3.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-soft-3-0.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-soft-3-1.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-soft-3-2.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "success-soft-3-3.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 2
+    },
+    {
+      "file": "expired.wav",
+      "source": "Project-authored procedural synthesis; scripts/generate_game_audio.py",
+      "version": 1
     }
   ]
 }

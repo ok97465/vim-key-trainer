@@ -336,17 +336,18 @@ def test_offscreen_failed_fragment_still_renders_without_scrolling_engine(
     comparison.show_current(session.engine.state)
     overlay.set_session(session)
     overlay.animation.stop()
-    overlay._progress = 0.4
     bar = comparison.current_scroll.verticalScrollBar()
     bar.setValue(bar.maximum())
     offset = bar.value()
     snapshot = session.engine.snapshot()
-    image = overlay.grab().toImage()
-    # 실제 잘라내기 궤적이 뷰포트 안에 그려져야 한다. 원문은 스크롤 밖이다.
-    assert any(
-        image.pixelColor(x, y).name() == "#fb9d86"
-        for y in range(image.height())
-        for x in range(0, image.width(), 2)
+    overlay._progress = 0.14
+    impact = overlay.grab().toImage()
+    overlay._progress = 0.96
+    badge_only = overlay.grab().toImage()
+    # 원문이 화면 밖일 때 파손 효과는 왼쪽 여백에 나타난다.
+    width = round(72 * impact.devicePixelRatio())
+    assert impact.copy(0, 0, width, impact.height()) != badge_only.copy(
+        0, 0, width, badge_only.height()
     )
     assert bar.value() == offset
     assert session.engine.snapshot() == snapshot
